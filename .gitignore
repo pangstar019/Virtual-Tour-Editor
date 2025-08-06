@@ -1,5 +1,8 @@
 target/
 debug/
-src/*.db
+.db
 *.lock
-src/poker.db
+
+# Configuration files with sensitive data
+config.toml
+*.env
