@@ -1,6 +1,19 @@
 CREATE TABLE IF NOT EXISTS users (
     name TEXT PRIMARY KEY,
-    password TEXT NOT NULL
+    password TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_login TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    logged_in BOOLEAN NOT NULL DEFAULT 0,
+    session_token TEXT
+);
+
+CREATE TABLE IF NOT EXISTS user_sessions (
+    session_token TEXT PRIMARY KEY,
+    username TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_activity TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_active BOOLEAN NOT NULL DEFAULT 1,
+    FOREIGN KEY (username) REFERENCES users(name)
 );
 
 CREATE TABLE IF NOT EXISTS tours (
@@ -10,12 +23,12 @@ CREATE TABLE IF NOT EXISTS tours (
     owner TEXT NOT NULL,
     tour_name TEXT NOT NULL,
     location TEXT,
-    initial_scene_id INTEGER,
+    longitude REAL,
+    latitude REAL,
+    initial_scene_id INTEGER DEFAULT 1,
     has_floorplan BOOLEAN NOT NULL DEFAULT 0,
-    floorplan_id INTEGER,
-    FOREIGN KEY (owner) REFERENCES users(name),
-    FOREIGN KEY (initial_scene_id) REFERENCES assets(id)
-    FOREIGN KEY (floorplan_id) REFERENCES assets(id)
+    floorplan_id INTEGER DEFAULT 1,
+    FOREIGN KEY (owner) REFERENCES users(name)
 );
 
 CREATE TABLE IF NOT EXISTS assets (

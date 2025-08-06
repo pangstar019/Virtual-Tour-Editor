@@ -2,12 +2,12 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Poker Login</title>
+    <title>Virtual Tour Editor - Login</title>
     <style>
       body {
-        font-family: Arial, sans-serif;
-        background: #2c3e50;
-        color: #ecf0f1;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: #333;
         margin: 0;
         padding: 0;
         height: 100vh;
@@ -17,30 +17,40 @@
       }
 
       .login-container {
-        background: #34495e;
-        border-radius: 8px;
-        padding: 30px;
-        width: 350px;
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+        background: rgba(255, 255, 255, 0.95);
+        border-radius: 16px;
+        padding: 40px;
+        width: 400px;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
         text-align: center;
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
       }
 
       h1 {
-        color: #f8c471;
+        color: #4a5568;
         margin-bottom: 30px;
         font-size: 28px;
+        font-weight: 300;
       }
 
       .input-field {
         width: 100%;
-        padding: 12px;
+        padding: 15px;
         margin-bottom: 20px;
         box-sizing: border-box;
-        border: 1px solid #3498db;
-        border-radius: 4px;
-        background-color: #2c3e50;
-        color: #ecf0f1;
+        border: 2px solid #e2e8f0;
+        border-radius: 8px;
+        background-color: #ffffff;
+        color: #2d3748;
         font-size: 16px;
+        transition: border-color 0.3s ease;
+      }
+
+      .input-field:focus {
+        outline: none;
+        border-color: #667eea;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
       }
 
       .button-group {
@@ -51,86 +61,127 @@
 
       button {
         flex: 1;
-        padding: 12px 0;
+        padding: 15px 0;
         border: none;
-        border-radius: 4px;
+        border-radius: 8px;
         cursor: pointer;
         font-size: 16px;
-        font-weight: bold;
-        transition: background-color 0.3s;
+        font-weight: 600;
+        transition: all 0.3s ease;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
       }
 
       .login-btn {
-        background-color: #3498db;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
       }
 
       .login-btn:hover {
-        background-color: #2980b9;
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
       }
 
       .register-btn {
-        background-color: #2ecc71;
+        background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
         color: white;
       }
 
       .register-btn:hover {
-        background-color: #27ae60;
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(72, 187, 120, 0.3);
       }
 
       #message {
         padding: 10px;
         margin-top: 15px;
-        color: #e74c3c;
+        color: #e53e3e;
         min-height: 20px;
+        font-weight: 500;
       }
 
       .logo {
-        font-size: 42px;
-        margin-bottom: 20px;
-        color: #f8c471;
+        font-size: 48px;
+        margin-bottom: 10px;
+        color: #667eea;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
       }
 
-      .card-suits {
-        margin-top: 20px;
-        font-size: 24px;
+      .tour-icons {
+        margin-top: 25px;
+        font-size: 20px;
         letter-spacing: 15px;
+        color: #a0aec0;
+        opacity: 0.7;
       }
 
-      .heart, .diamond {
-        color: #e74c3c;
+      .divider {
+        margin: 25px 0;
+        text-align: center;
+        position: relative;
       }
 
-      .spade, .club {
-        color: #ecf0f1;
+      .divider::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 0;
+        right: 0;
+        height: 1px;
+        background: linear-gradient(to right, transparent, #e2e8f0, transparent);
+      }
+
+      .divider span {
+        background: rgba(255, 255, 255, 0.95);
+        padding: 0 20px;
+        color: #a0aec0;
+        font-size: 14px;
+        position: relative;
       }
     </style>
   </head>
   <body>
     <div class="login-container">
-      <div class="logo">♠️ Poker Game</div>
-      <h1>Welcome to the Table</h1>
+      <div class="logo">
+        🌐 Virtual Tour Editor
+      </div>
+      <h1>Welcome to Your Tour Studio</h1>
       
-      <input type="text" id="username" placeholder="Enter username" class="input-field" required />
-      <input type="password" id="password" placeholder="Enter password" class="input-field" required />
+      <input type="text" id="username" placeholder="Enter your username" class="input-field" required />
+      <input type="password" id="password" placeholder="Enter your password" class="input-field" required />
       
       <div class="button-group">
-        <button class="login-btn" onclick="login()">Login</button>
-        <button class="register-btn" onclick="registerUser()">Register</button>
+        <button class="login-btn" onclick="login()">Sign In</button>
+        <button class="register-btn" onclick="registerUser()">Create Account</button>
       </div>
       
       <div id="message"></div>
       
-      <div class="card-suits">
-        <span class="heart">♥</span>
-        <span class="spade">♠</span>
-        <span class="club">♣</span>
-        <span class="diamond">♦</span>
+      <div class="tour-icons">
+        📸 🗺️ 🎥 🎨
       </div>
     </div>
 
     <script>
       const messageDiv = document.getElementById("message");
+
+      // Parse JWT token (simple decoder for client-side use only)
+      function parseJwt(token) {
+        try {
+          const base64Url = token.split('.')[1];
+          const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+          const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+          }).join(''));
+          return JSON.parse(jsonPayload);
+        } catch (e) {
+          console.error("Error parsing JWT:", e);
+          return {};
+        }
+      }
 
       // Listen for messages from parent frame
       window.addEventListener("message", (event) => {
@@ -145,6 +196,11 @@
           const response = JSON.parse(data);
           if (response.message) {
             messageDiv.innerText = response.message;
+          }
+          if (response.sessionToken && response.username) {
+            // Save session information
+            localStorage.setItem('sessionToken', response.sessionToken);
+            localStorage.setItem('currentPlayerName', response.username);
           }
           if (response.redirect) {
             // Navigate using parent frame
@@ -175,7 +231,7 @@
           return;
         }
         
-        localStorage.setItem('currentPlayerName', username);
+        localStorage.setItem('currentUserName', username);
 
         sendToServer(JSON.stringify({ action: "Login", data: { username, password } }));
       }
@@ -189,7 +245,7 @@
           return;
         }
         
-        localStorage.setItem('currentPlayerName', username);
+        localStorage.setItem('currentUserName', username);
         sendToServer(
           JSON.stringify({ action: "Register", data: { username, password } })
         );

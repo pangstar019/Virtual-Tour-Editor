@@ -1,7 +1,9 @@
 
 
 
+use serde::{Serialize, Deserialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tour {
     id: i32,
     pub name: String,
@@ -25,5 +27,13 @@ impl Tour {
             has_floorplan,
             floorplan_id
         }
+    }
+
+    pub fn get_id(&self) -> i32 {
+        self.id
+    }
+
+    pub fn set_id(&mut self, id: i32) {
+        self.id = id;
     }
 }

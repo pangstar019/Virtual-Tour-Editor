@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
   <head>
     <meta charset="UTF-8" />
     <title>Poker Game</title>
@@ -16,31 +16,154 @@
       }
     </style>
     <script>
-      // Global WebSocket connection
+      // Global WebSocket connection with reconnection logic
+      let socket = null;
+      let reconnectInterval = null;
+      let reconnectAttempts = 0;
+      const maxReconnectAttempts = 10;
+      const reconnectDelay = 2000; // 2 seconds
+      let isManualDisconnect = false;
+      let isLoggedIn = false;
+      let currentUser = null;
+      let heartbeatInterval = null;
+
       const wsProtocol =
         window.location.protocol === "https:" ? "wss://" : "ws://";
       const wsAddr = wsProtocol + window.location.hostname + ":1112/connect";
-      const socket = new WebSocket(wsAddr);
-      console.log("client connected to server");
+
+      function startHeartbeat() {
+        // Send heartbeat every 30 seconds to keep session active
+        if (heartbeatInterval) {
+          clearInterval(heartbeatInterval);
+        }
+        heartbeatInterval = setInterval(() => {
+          if (socket && socket.readyState === WebSocket.OPEN && isLoggedIn) {
+            socket.send(JSON.stringify({ action: "Heartbeat" }));
+          }
+        }, 30000); // 30 seconds
+      }
+
+      function stopHeartbeat() {
+        if (heartbeatInterval) {
+          clearInterval(heartbeatInterval);
+          heartbeatInterval = null;
+        }
+      }
+
+      function connectWebSocket() {
+        socket = new WebSocket(wsAddr);
+        console.log("Attempting to connect to server...");
+
+        socket.onopen = function() {
+          console.log("WebSocket connected successfully");
+          reconnectAttempts = 0;
+          
+          // Clear any existing reconnect interval
+          if (reconnectInterval) {
+            clearInterval(reconnectInterval);
+            reconnectInterval = null;
+          }
+
+          // If user was previously logged in, attempt to restore session
+          const savedUser = localStorage.getItem('currentPlayerName');
+          const sessionToken = localStorage.getItem('sessionToken');
+          
+          if (savedUser && sessionToken) {
+            console.log("Attempting to restore session for user:", savedUser);
+            console.log("token: ", sessionToken);
+            socket.send(JSON.stringify({ 
+              action: "RestoreSession", 
+              data: { 
+                username: savedUser, 
+                session_token: sessionToken 
+              } 
+            }));
+          }
+          
+          // Start heartbeat when connected
+          if (isLoggedIn) {
+            startHeartbeat();
+          }
+        };
+
+        socket.onmessage = function(event) {
+          const frame = document.getElementById("gameFrame");
+          if (frame && frame.contentWindow) {
+            frame.contentWindow.postMessage(
+              {
+                type: "websocket",
+                data: event.data,
+              },
+              "*"
+            );
+          }
+
+          // Handle session-related messages
+          try {
+            const data = JSON.parse(event.data);
+            if (data.sessionToken) {
+              localStorage.setItem('sessionToken', data.sessionToken);
+              localStorage.setItem('currentPlayerName', data.username);
+              isLoggedIn = true;
+              currentUser = data.username;
+              startHeartbeat();
+            }
+            if (data.sessionRestored) {
+              console.log("Session restored successfully");
+              isLoggedIn = true;
+              currentUser = data.username;
+              localStorage.setItem('currentPlayerName', data.username);
+              startHeartbeat();
+            }
+            if (data.redirect === "login") {
+              isLoggedIn = false;
+              localStorage.removeItem('sessionToken');
+              localStorage.removeItem('currentPlayerName');
+              stopHeartbeat();
+            }
+          } catch (e) {
+            // Not JSON or doesn't contain session info, ignore
+          }
+        };
+
+        socket.onclose = function(event) {
+          console.log("WebSocket connection closed", event);
+          
+          // Only attempt to reconnect if it wasn't a manual disconnect
+          if (!isManualDisconnect && reconnectAttempts < maxReconnectAttempts) {
+            console.log(`Attempting to reconnect... (${reconnectAttempts + 1}/${maxReconnectAttempts})`);
+            reconnectAttempts++;
+            
+            reconnectInterval = setTimeout(() => {
+              connectWebSocket();
+            }, reconnectDelay * reconnectAttempts); // Exponential backoff
+          } else if (reconnectAttempts >= maxReconnectAttempts) {
+            console.error("Max reconnection attempts reached. Please refresh the page.");
+            // Show user a message about connection issues
+            const frame = document.getElementById("gameFrame");
+            if (frame && frame.contentWindow) {
+              frame.contentWindow.postMessage(
+                {
+                  type: "websocket",
+                  data: JSON.stringify({
+                    error: "Connection lost. Please refresh the page to reconnect."
+                  }),
+                },
+                "*"
+              );
+            }
+          }
+        };
+
+        socket.onerror = function(error) {
+          console.error("WebSocket error:", error);
+        };
+      }
 
       // Handle navigation between pages
       function navigate(page) {
         document.getElementById("gameFrame").src = `/${page}`;
       }
-
-      // Forward messages to current frame
-      socket.onmessage = (event) => {
-        const frame = document.getElementById("gameFrame");
-        if (frame && frame.contentWindow) {
-          frame.contentWindow.postMessage(
-            {
-              type: "websocket",
-              data: event.data,
-            },
-            "*"
-          );
-        }
-      };
 
       // Listen for messages from iframe
       window.addEventListener("message", (event) => {
@@ -48,21 +171,39 @@
           if (socket && socket.readyState === WebSocket.OPEN) {
             socket.send(event.data.data);
           } else {
-            console.error("WebSocket is not open");
+            console.error("WebSocket is not open, attempting to reconnect...");
+            connectWebSocket();
           }
         }
       });
 
-      // Detect when user is leaving the page
-      window.addEventListener("beforeunload", function () {
-        if (socket && socket.readyState === WebSocket.OPEN) {
-          // Send a disconnect message to the server
-          socket.send(JSON.stringify({ action: "Disconnect" }));
+      // Handle page visibility changes (when user switches tabs or minimizes)
+      document.addEventListener("visibilitychange", function() {
+        if (document.hidden) {
+          // Page is hidden, don't disconnect
+          console.log("Page hidden, maintaining connection");
+        } else {
+          // Page is visible again, check connection
+          console.log("Page visible again");
+          if (socket && socket.readyState !== WebSocket.OPEN) {
+            connectWebSocket();
+          }
         }
       });
 
-      // Initialize to login page
+      // Only disconnect on actual page unload (not refresh)
+      window.addEventListener("beforeunload", function(event) {
+        // For modern browsers, this is primarily a refresh detection
+        // We'll use a more conservative approach and avoid disconnecting on refresh
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          // Don't disconnect - let the reconnection logic handle it
+          console.log("Page unloading, maintaining connection for potential reconnect");
+        }
+      });
+
+      // Initialize connection and navigate to login page
       window.onload = function () {
+        connectWebSocket();
         navigate("login");
       };
     </script>

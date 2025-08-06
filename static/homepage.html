@@ -4,83 +4,357 @@
     <meta charset="UTF-8" />
     <title>Server Lobby</title>
     <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      
       body {
-        font-family: Arial, sans-serif;
-        background: #2c3e50;
-        color: #ecf0f1;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: #333;
+        min-height: 100vh;
         padding: 20px;
       }
-      .lobby-info {
-        background: #34495e;
-        padding: 15px;
-        border-radius: 5px;
-        margin-bottom: 10px;
+      
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
       }
-      #playerCount {
-        font-size: 1.2em;
-        margin-bottom: 15px;
-      }
-      button {
-        padding: 10px 20px;
-        margin: 5px;
-        background: #3498db;
-        color: white;
-        border: none;
-        border-radius: 3px;
-        cursor: pointer;
-      }
-      button:hover {
-        background: #2980b9;
-      }
-      .lobby-list {
-        background: #34495e;
-        padding: 15px;
-        border-radius: 5px;
-        margin-top: 20px;
-      }
-      .lobby-list-header {
-        font-size: 1.2em;
-        margin-bottom: 10px;
-        font-weight: bold;
-      }
-      .lobby-item {
-        padding: 8px;
-        margin: 5px 0;
-        background: #2c3e50;
-        border-radius: 3px;
-      }
-      .lobby-details {
+      
+      .header {
         display: flex;
         justify-content: space-between;
+        align-items: center;
+        margin-bottom: 30px;
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(10px);
+        padding: 20px 30px;
+        border-radius: 16px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+      }
+      
+      .header h1 {
+        color: #333;
+        font-size: 28px;
+        font-weight: 600;
+      }
+      
+      .user-profile {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+      }
+      
+      .user-avatar {
+        width: 45px;
+        height: 45px;
+        border-radius: 50%;
+        border: 3px solid #667eea;
+      }
+      
+      .user-info {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+      }
+      
+      .user-name {
+        font-weight: 600;
+        color: #333;
+        font-size: 16px;
+      }
+      
+      .user-email {
+        font-size: 14px;
+        color: #666;
+      }
+      
+      .sign-out-btn {
+        background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 25px;
+        cursor: pointer;
+        font-weight: 500;
+        transition: all 0.3s ease;
+      }
+      
+      .sign-out-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(238, 90, 36, 0.3);
+      }
+      
+      .stats-bar {
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(10px);
+        padding: 20px 30px;
+        border-radius: 16px;
+        margin-bottom: 30px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+      }
+      
+      .action-buttons {
+        display: flex;
+        gap: 15px;
+        margin-bottom: 30px;
+        flex-wrap: wrap;
+      }
+      
+      button {
+        background: linear-gradient(135deg, #667eea, #764ba2);
+        color: white;
+        border: none;
+        padding: 12px 24px;
+        border-radius: 25px;
+        cursor: pointer;
+        font-weight: 500;
+        font-size: 14px;
+        transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+      }
+      
+      button:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+      }
+      
+      .create-tour-btn {
+        background: linear-gradient(135deg, #55efc4, #00b894);
+        box-shadow: 0 4px 15px rgba(85, 239, 196, 0.3);
+      }
+      
+      .create-tour-btn:hover {
+        box-shadow: 0 8px 25px rgba(85, 239, 196, 0.4);
+      }
+      
+      .tours-section {
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(10px);
+        border-radius: 16px;
+        padding: 30px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+      }
+      
+      .tours-header {
+        font-size: 24px;
+        font-weight: 600;
+        color: #333;
+        margin-bottom: 25px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      
+      .tours-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 20px;
+      }
+      
+      .tour-card {
+        background: white;
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        transition: all 0.3s ease;
+        border: 1px solid rgba(102, 126, 234, 0.1);
+      }
+      
+      .tour-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+      }
+      
+      .tour-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: #333;
         margin-bottom: 8px;
       }
-      .lobby-name {
-        font-weight: bold;
+      
+      .tour-location {
+        color: #666;
+        font-size: 14px;
+        margin-bottom: 12px;
+        display: flex;
+        align-items: center;
+        gap: 5px;
       }
-      .lobby-type {
-        color: #95a5a6;
+      
+      .tour-date {
+        color: #999;
+        font-size: 12px;
+        margin-bottom: 15px;
       }
-      .lobby-status {
-        color: #2ecc71;
+      
+      .tour-actions {
+        display: flex;
+        gap: 10px;
       }
-      .lobby-buttons {
-        text-align: right;
+      
+      .edit-btn {
+        background: linear-gradient(135deg, #74b9ff, #0984e3);
+        padding: 8px 16px;
+        font-size: 12px;
+        border-radius: 20px;
+        box-shadow: 0 3px 10px rgba(116, 185, 255, 0.3);
       }
-      .lobby-join-btn {
-        background: #2ecc71;
-        padding: 5px 10px;
-        font-size: 0.9em;
+      
+      .edit-btn:hover {
+        box-shadow: 0 5px 15px rgba(116, 185, 255, 0.4);
       }
-      .lobby-join-btn:hover {
-        background: #27ae60;
+      
+      .delete-btn {
+        background: linear-gradient(135deg, #fd79a8, #e84393);
+        padding: 8px 16px;
+        font-size: 12px;
+        border-radius: 20px;
+        box-shadow: 0 3px 10px rgba(253, 121, 168, 0.3);
       }
-      .lobby-spectate-btn {
-        background: #95a5a6;
-        padding: 5px 10px;
-        font-size: 0.9em;
+      
+      .delete-btn:hover {
+        box-shadow: 0 5px 15px rgba(253, 121, 168, 0.4);
       }
-      .lobby-spectate-btn:hover {
-        background: #7f8c8d;
+      
+      .empty-state {
+        text-align: center;
+        padding: 60px 20px;
+        color: #666;
+      }
+      
+      .empty-state-icon {
+        font-size: 48px;
+        margin-bottom: 20px;
+        opacity: 0.5;
+      }
+      
+      .create-new-placeholder {
+        background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+        border: 2px dashed rgba(102, 126, 234, 0.3);
+        border-radius: 12px;
+        padding: 40px 20px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.3s ease;
+      }
+      
+      .create-new-placeholder:hover {
+        border-color: rgba(102, 126, 234, 0.6);
+        background: linear-gradient(135deg, rgba(102, 126, 234, 0.15), rgba(118, 75, 162, 0.15));
+      }
+      
+      .create-icon {
+        font-size: 48px;
+        color: #667eea;
+        margin-bottom: 15px;
+      }
+      
+      .create-text {
+        color: #667eea;
+        font-weight: 600;
+        font-size: 16px;
+      }
+      
+      /* Responsive Design */
+      @media (max-width: 768px) {
+        .header {
+          flex-direction: column;
+          gap: 20px;
+          text-align: center;
+        }
+        
+        .user-profile {
+          order: -1;
+        }
+        
+        .tours-grid {
+          grid-template-columns: 1fr;
+        }
+        
+        .action-buttons {
+          justify-content: center;
+        }
+        
+        .modal-content {
+          width: 95%;
+          padding: 30px 20px;
+        }
+      }
+      
+      @media (max-width: 480px) {
+        body {
+          padding: 10px;
+        }
+        
+        .header h1 {
+          font-size: 24px;
+        }
+        
+        .tours-header {
+          font-size: 20px;
+        }
+        
+        .action-buttons {
+          flex-direction: column;
+        }
+        
+        button {
+          width: 100%;
+          justify-content: center;
+        }
+      }
+      
+      /* Loading animation */
+      .loading {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 200px;
+        color: #667eea;
+        font-size: 16px;
+      }
+      
+      .loading::after {
+        content: '';
+        width: 20px;
+        height: 20px;
+        border: 2px solid #667eea;
+        border-top: 2px solid transparent;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-left: 10px;
+      }
+      
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      
+      /* Smooth transitions */
+      * {
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      }
+      
+      /* Custom scrollbar */
+      ::-webkit-scrollbar {
+        width: 8px;
+      }
+      
+      ::-webkit-scrollbar-track {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 4px;
+      }
+      
+      ::-webkit-scrollbar-thumb {
+        background: rgba(102, 126, 234, 0.5);
+        border-radius: 4px;
+      }
+      
+      ::-webkit-scrollbar-thumb:hover {
+        background: rgba(102, 126, 234, 0.7);
       }
 
       /* Modal styling */
@@ -92,105 +366,159 @@
         top: 0;
         width: 100%;
         height: 100%;
-        background-color: rgba(0, 0, 0, 0.7);
+        background-color: rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(5px);
         align-items: center;
         justify-content: center;
       }
+      
       .modal-content {
-        background-color: #34495e;
-        color: #ecf0f1;
+        background: white;
         margin: auto;
-        padding: 20px;
-        border: 1px solid #3498db;
-        border-radius: 5px;
-        width: 50%;
-        max-width: 600px;
+        padding: 40px;
+        border-radius: 20px;
+        width: 90%;
+        max-width: 500px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        position: relative;
       }
+      
       .user-manual-content {
         width: 80%;
         height: 80%;
         max-width: 900px;
+        background: white;
+        border-radius: 20px;
       }
+      
       .user-manual-iframe {
         width: 100%;
         height: calc(100% - 60px);
         border: none;
         margin-top: 10px;
+        border-radius: 12px;
       }
+      
       .close {
-        color: #aaa;
+        color: #999;
         float: right;
-        font-size: 28px;
+        font-size: 32px;
         font-weight: bold;
         cursor: pointer;
+        position: absolute;
+        top: 15px;
+        right: 25px;
+        transition: color 0.3s ease;
       }
+      
       .close:hover,
       .close:focus {
-        color: white;
+        color: #667eea;
         text-decoration: none;
-        cursor: pointer;
       }
+      
+      .modal h2 {
+        color: #333;
+        margin-bottom: 25px;
+        font-size: 24px;
+        font-weight: 600;
+      }
+      
       .form-group {
-        margin-bottom: 15px;
+        margin-bottom: 20px;
       }
+      
       .form-group label {
         display: block;
-        margin-bottom: 5px;
+        margin-bottom: 8px;
+        color: #333;
+        font-weight: 500;
+        font-size: 14px;
       }
+      
       .form-group input,
       .form-group select {
         width: 100%;
-        padding: 8px;
+        padding: 12px 16px;
         box-sizing: border-box;
-        background-color: #2c3e50;
-        color: #ecf0f1;
-        border: 1px solid #3498db;
-        border-radius: 3px;
+        background-color: #f8f9fa;
+        color: #333;
+        border: 2px solid #e9ecef;
+        border-radius: 12px;
+        font-size: 14px;
+        transition: all 0.3s ease;
       }
+      
+      .form-group input:focus,
+      .form-group select:focus {
+        outline: none;
+        border-color: #667eea;
+        background-color: white;
+        box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+      }
+      
       .form-group select option {
-        background-color: #2c3e50;
+        background-color: white;
       }
+      
       .error-message {
         color: #e74c3c;
-        margin-top: 10px;
-        font-size: 0.9em;
+        margin: 20px 0;
+        font-size: 14px;
+        padding: 12px 16px;
+        background: rgba(231, 76, 60, 0.1);
+        border-radius: 8px;
+        border-left: 4px solid #e74c3c;
+        display: none; /* Hidden by default */
+      }
+      
+      .error-message.show {
+        display: block;
       }
     </style>
   </head>
   <body>
-    <h1>Server Lobby</h1>
-    <div class="lobby-info">
-      <div id="playerCount">Players Online: 0</div>
-      <div id="response"></div>
-    </div>
-    <button onclick="openCreateLobbyModal()">Create Game Lobby</button>
-    <button onclick="viewStats()">View Stats</button>
-    <button onclick="showUserManual()">Help</button>
+    <div class="container">
+      <div class="header">
+        <h1>🌐 Virtual Tour Editor</h1>
+        <div class="user-profile" id="userProfile">
+          <img id="userPicture" src="" alt="Profile" class="user-avatar" style="display: none;">
+          <div class="user-info">
+            <div id="userName" class="user-name"></div>
+            <div id="userEmail" class="user-email"></div>
+          </div>
+          <button onclick="signOut()" class="sign-out-btn">Sign Out</button>
+        </div>
+      </div>
+      
+      <div class="action-buttons">
+        <button onclick="openCreateTourModal()" class="create-tour-btn">✨ Create New Tour</button>
+        <button onclick="showUserManual()">❓ Help</button>
+      </div>
 
-    <div class="lobby-list">
-      <div class="lobby-list-header">Available Game Lobbies</div>
-      <div id="lobbyList">Loading lobbies...</div>
+      <div class="tours-section">
+        <div class="tours-header">
+          🏛️ Your Virtual Tours
+        </div>
+        <div id="tourList" class="tours-grid">Loading tours...</div>
+      </div>
     </div>
 
-    <!-- Create Lobby Modal -->
-    <div id="createLobbyModal" class="modal">
+    <!-- Create Tour Modal -->
+    <div id="createTourModal" class="modal">
       <div class="modal-content">
-        <span class="close" onclick="closeCreateLobbyModal()">&times;</span>
-        <h2>Create New Game Lobby</h2>
+        <span class="close" onclick="closeCreateTourModal()">&times;</span>
+        <h2>Create New Virtual Tour</h2>
         <div class="form-group">
-          <label for="lobbyName">Lobby Name:</label>
-          <input type="text" id="lobbyName" placeholder="Enter lobby name" />
+          <label for="tourName">Tour Name:</label>
+          <input type="text" id="tourName" placeholder="Enter tour name" />
         </div>
         <div class="form-group">
-          <label for="gameType">Game Type:</label>
-          <select id="gameType">
-            <option value="1">5 Card Draw</option>
-            <option value="2">7 Card Stud</option>
-            <option value="3">Texas Hold'em</option>
-          </select>
+          <label for="tourLocation">Location:</label>
+          <input type="text" id="tourLocation" placeholder="Enter location (optional)" />
         </div>
-        <div id="createLobbyError" class="error-message"></div>
-        <button onclick="submitCreateLobby()">Create Lobby</button>
+        <div id="createTourError" class="error-message"></div>
+        <button onclick="submitCreateTour()">Create Tour</button>
       </div>
     </div>
 
@@ -206,32 +534,60 @@
       </div>
     </div>
 
-    <!-- Add this modal for stats after the User Manual modal -->
-    <div id="statsModal" class="modal">
-      <div class="modal-content">
-        <span class="close" onclick="closeStatsModal()">&times;</span>
-        <h2>Player Statistics</h2>
-        <div id="statsContent">Loading statistics...</div>
-      </div>
-    </div>
-
     <script>
-      const playerCountDiv = document.getElementById("playerCount");
-      const lobbyListDiv = document.getElementById("lobbyList");
+      const tourListDiv = document.getElementById("tourList");
       const responseDiv = document.getElementById("response");
-      const createLobbyModal = document.getElementById("createLobbyModal");
-      const createLobbyError = document.getElementById("createLobbyError");
+      const createTourModal = document.getElementById("createTourModal");
+      const createTourError = document.getElementById("createTourError");
 
       window.onload = function () {
-        refreshPlayers();
-        refreshLobbies();
-
-        // Set up periodic refresh
-        setInterval(() => {
-          refreshPlayers();
-          refreshLobbies();
-        }, 10000); // Refresh every 10 seconds
+        loadUserProfile();
+        refreshTours();
       };
+
+      // Load user profile information
+      function loadUserProfile() {
+        const userName = localStorage.getItem('currentUserName');
+        const userEmail = localStorage.getItem('userEmail');
+        const userPicture = localStorage.getItem('userPicture');
+
+        if (userName) {
+          document.getElementById('userName').textContent = userName;
+        }
+        
+        if (userEmail) {
+          document.getElementById('userEmail').textContent = userEmail;
+        }
+        
+        if (userPicture) {
+          const pictureElement = document.getElementById('userPicture');
+          pictureElement.src = userPicture;
+          pictureElement.style.display = 'block';
+        }
+      }
+
+      // Sign out function
+      function signOut() {
+        // Clear local storage
+        localStorage.removeItem('currentUserName');
+        localStorage.removeItem('userEmail');
+        localStorage.removeItem('userPicture');
+        
+        // Sign out from Google if available
+        if (typeof gapi !== 'undefined' && gapi.auth2) {
+          const auth2 = gapi.auth2.getAuthInstance();
+          if (auth2) {
+            auth2.signOut().then(function() {
+              console.log('User signed out from Google.');
+            });
+          }
+        }
+        
+        // Navigate back to login
+        sendToServer(JSON.stringify({ action: "Logout" }));
+
+        window.parent.navigate('login');
+      }
 
       window.addEventListener("message", (event) => {
         if (event.data.type === "websocket") {
@@ -250,17 +606,23 @@
             }, 5000); // Clear message after 5 seconds
           }
           if (response.playerCount) {
-            playerCountDiv.innerText = `Players Online: ${response.playerCount}`;
+            playerCountDiv.innerText = `Users Online: ${response.playerCount}`;
           }
           if (response.redirect) {
+            // Clear session data if redirecting to login
+            if (response.redirect === "login") {
+              localStorage.removeItem('sessionToken');
+              localStorage.removeItem('currentPlayerName');
+            }
             // Navigate using parent frame
             window.parent.navigate(response.redirect);
           }
-          if (response.lobbies) {
-            displayLobbies(response.lobbies);
+          if (response.tours) {
+            displayTours(response.tours);
           }
           if (response.error) {
-            createLobbyError.innerText = response.error;
+            createTourError.innerText = response.error;
+            createTourError.classList.add('show');
           }
           if (response.stats) {
             console.log("Received stats:", response.stats);
@@ -287,45 +649,6 @@
         }
       }
 
-      function displayLobbies(lobbies) {
-        if (lobbies.length === 0) {
-          lobbyListDiv.innerHTML = "<p>No active lobbies at the moment.</p>";
-          return;
-        }
-
-        let lobbyHTML = "";
-        lobbies.forEach((lobby) => {
-          const isJoinable =
-            lobby.status === "Joinable" && lobby.playerCount < lobby.maxPlayers;
-          const statusText = isJoinable
-            ? `<span class="lobby-status">${lobby.status}</span>`
-            : `<span style="color: #e74c3c;">${lobby.status}</span>`;
-
-          // Only show join button if the lobby is joinable
-          const joinButton = isJoinable
-            ? `<button class="lobby-join-btn" onclick="joinLobby('${lobby.name.replace(/'/g, "\\'")}', '${lobby.type.replace(/'/g, "\\'")}', false)">Join</button>`
-            : "";
-
-          lobbyHTML += `
-                <div class="lobby-item">
-                    <div class="lobby-details">
-                        <div>
-                            <span class="lobby-name">${lobby.name}</span> 
-                            <span class="lobby-type">(${lobby.type})</span>
-                        </div>
-                        <div>
-                            Players: ${lobby.playerCount} / ${lobby.maxPlayers} | ${statusText}
-                        </div>
-                    </div>
-                    <div class="lobby-buttons">
-                        ${joinButton}
-                        <button class="lobby-spectate-btn" onclick="joinLobby('${lobby.name.replace(/'/g, "\\'")}', '${lobby.type.replace(/'/g, "\\'")}', true)">Spectate</button>
-                    </div>
-                </div>`;
-        });
-        lobbyListDiv.innerHTML = lobbyHTML;
-      }
-
       // Send messages through parent using postMessage
       function sendToServer(message) {
         window.parent.postMessage(
@@ -337,70 +660,104 @@
         );
       }
 
-      function refreshPlayers() {
-        sendToServer(JSON.stringify({ action: "ShowPlayers" }));
+      function refreshTours() {
+        sendToServer(JSON.stringify({ action: "ShowTours" }));
+        tourListDiv.innerHTML = '<div class="loading">Loading tours</div>';
       }
 
-      function refreshLobbies() {
-        sendToServer(JSON.stringify({ action: "ShowLobbies" }));
-        lobbyListDiv.innerHTML = "Loading lobbies...";
+      function displayTours(tours) {
+        if (tours.length === 0) {
+          tourListDiv.innerHTML = `
+            <div class="create-new-placeholder" onclick="openCreateTourModal()">
+              <div class="create-icon">➕</div>
+              <div class="create-text">Create your first virtual tour!</div>
+            </div>
+          `;
+          return;
+        }
+
+        let tourHTML = "";
+        tours.forEach((tour) => {
+          const createdDate = new Date(tour.created_at).toLocaleDateString('en-US', {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+          });
+          
+          tourHTML += `
+            <div class="tour-card">
+              <div class="tour-title">${tour.name}</div>
+              <div class="tour-location">📍 ${tour.location}</div>
+              <div class="tour-date">Created: ${createdDate}</div>
+              <div class="tour-actions">
+                <button class="edit-btn" onclick="editTour('${tour.id}')">✏️ Edit</button>
+                <button class="delete-btn" onclick="deleteTour('${tour.id}')">🗑️ Delete</button>
+              </div>
+            </div>
+          `;
+        });
+        
+        // Add the create new tour card at the end
+        tourHTML += `
+          <div class="create-new-placeholder" onclick="openCreateTourModal()">
+            <div class="create-icon">➕</div>
+            <div class="create-text">Create New Tour</div>
+          </div>
+        `;
+        
+        tourListDiv.innerHTML = tourHTML;
       }
 
-      function openCreateLobbyModal() {
-        createLobbyModal.style.display = "block";
-        createLobbyError.innerText = "";
-        document.getElementById("lobbyName").value = "";
+      function editTour(tourId) {
+        // Navigate to editor with tour ID
+        localStorage.setItem('currentTourId', tourId);
+        window.parent.navigate('editor');
       }
 
-      function closeCreateLobbyModal() {
-        createLobbyModal.style.display = "none";
+      function deleteTour(tourId) {
+        if (confirm('Are you sure you want to delete this tour? This action cannot be undone.')) {
+          sendToServer(JSON.stringify({
+            action: "DeleteTour",
+            data: { tour_id: tourId }
+          }));
+        }
       }
 
-      function submitCreateLobby() {
-        const lobbyName = document.getElementById("lobbyName").value.trim();
-        const gameType = document.getElementById("gameType").value;
-        console.log(gameType);
+      function openCreateTourModal() {
+        createTourModal.style.display = "block";
+        createTourError.innerText = "";
+        createTourError.classList.remove('show');
+        document.getElementById("tourName").value = "";
+        document.getElementById("tourLocation").value = "";
+      }
 
-        if (!lobbyName) {
-          createLobbyError.innerText = "Please enter a lobby name";
+      function closeCreateTourModal() {
+        createTourModal.style.display = "none";
+      }
+
+      function submitCreateTour() {
+        const tourName = document.getElementById("tourName").value.trim();
+        const tourLocation = document.getElementById("tourLocation").value.trim();
+
+        if (!tourName) {
+          createTourError.innerText = "Please enter a tour name";
+          createTourError.classList.add('show');
           return;
         }
 
         // Close the modal
-        closeCreateLobbyModal();
+        closeCreateTourModal();
 
-        // Send the create lobby request to the server
+        // Send the create tour request to the server
         sendToServer(
           JSON.stringify({
-            action: "CreateLobby",
+            action: "CreateTour",
             data: {
-              lobby_name: lobbyName,
-              game_type: parseInt(gameType) + 9,
+              name: tourName,
+              location: tourLocation || "Unknown Location"
             },
           })
         );
-      }
-
-      function joinLobby(lobbyName, gameType, spectate) {
-        // Store the game type in localStorage before navigating
-        localStorage.setItem('currentGameType', gameType);
-        
-        // Send the join request to the server
-        sendToServer(
-          JSON.stringify({
-            action: "JoinLobby",
-            data: {
-              lobby_name: lobbyName,
-              spectate: spectate,
-            },
-          })
-        );
-      }
-
-      function viewStats() {
-        showStatsModal(); // Show the modal immediately for user feedback
-        console.log("Requesting player statistics from server...");
-        sendToServer(JSON.stringify({ action: "ShowStats" }));
       }
 
       function showUserManual() {
@@ -416,19 +773,10 @@
         document.getElementById('pdfError').style.display = 'block';
       }
 
-      function closeStatsModal() {
-        document.getElementById("statsModal").style.display = "none";
-      }
-
-      function showStatsModal() {
-        document.getElementById("statsModal").style.display = "flex";
-        document.getElementById("statsContent").innerHTML = "Loading statistics...";
-      }
-
       // Close modal if user clicks outside of it
       window.onclick = function (event) {
-        if (event.target === createLobbyModal) {
-          closeCreateLobbyModal();
+        if (event.target === createTourModal) {
+          closeCreateTourModal();
         }
         if (event.target === document.getElementById("userManualModal")) {
           closeUserManualModal();
