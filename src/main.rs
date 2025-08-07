@@ -30,7 +30,7 @@ use tower_http::{
     cors::CorsLayer,
     services::ServeDir,
 };
-use std::{sync::Arc, thread::sleep};
+use std::sync::Arc;
 use sqlx::SqlitePool;
 use tokio::sync::{mpsc, RwLock, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -75,7 +75,7 @@ enum ClientMessage {
     Disconnect,
     Login { username: String, password: String },
     Register { username: String, password: String },
-    RestoreSession { username: String, session_token: String },
+    RestoreSession { username: String, session_token: String, redirect: String },
     Heartbeat,
     Quit,
     Logout,
@@ -235,7 +235,7 @@ async fn handle_websocket(socket: WebSocket, state: AppState) {
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
     
     // Forward messages from our channel to the websocket
-    let mut send_task = tokio::spawn(async move {
+    let send_task = tokio::spawn(async move {
         let mut sender = sender;
         while let Some(msg) = rx.recv().await {
             if sender.send(msg).await.is_err() {
@@ -254,8 +254,6 @@ async fn handle_websocket(socket: WebSocket, state: AppState) {
 
     // Send initial welcome message
     let _ = tx.send(Message::Text(r#"{"message": "Welcome to Virtual Tour Editor!"}"#.to_string()));
-
-    let mut user_session_token: Option<String> = None;
     
     loop {
         // Handle login phase
@@ -334,12 +332,16 @@ async fn handle_login_phase(mut user: User, db: Arc<Database>) -> Option<User> {
                             }
                         }
                     }
-                    Ok(ClientMessage::RestoreSession { username, session_token }) => {
+                    Ok(ClientMessage::RestoreSession { username, session_token, redirect }) => {
                         match db.validate_session(&username, &session_token).await {
                             Ok(true) => {
-                                let _ = tx.send(Message::Text(
+                                // Only send redirect if user needs to be redirected to a different page
+                                let response = if redirect == "homepage" || redirect == "editor" {
+                                    format!(r#"{{"message": "Session restored successfully!", "sessionRestored": true, "username": "{}"}}"#, username)
+                                } else {
                                     format!(r#"{{"message": "Session restored successfully!", "sessionRestored": true, "username": "{}", "redirect": "homepage"}}"#, username)
-                                ));
+                                };
+                                let _ = tx.send(Message::Text(response));
                                 user.name = username.clone();
                                 user.session_token = Some(session_token);
                                 return Some(user.clone());
