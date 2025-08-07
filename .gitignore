@@ -6,3 +6,4 @@ debug/
 # Configuration files with sensitive data
 config.toml
 *.env
+config

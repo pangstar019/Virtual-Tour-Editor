@@ -2,10 +2,6 @@
 host = "0.0.0.0"
 port = 1112
 
-[oauth.google]
-client_id = "1042052477922-2a7cl3en8iffum3uafrm949nb7goeskq.apps.googleusercontent.com"
-client_secret = "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"
-
 [database]
 url = "sqlite:./virtual_tour_editor.db"
 
