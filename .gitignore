@@ -2,6 +2,7 @@ target/
 debug/
 .db
 *.lock
+assets/
 
 # Configuration files with sensitive data
 config.toml
