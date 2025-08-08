@@ -15,13 +15,6 @@ use crate::tour::Tour;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GoogleUserInfo {
-    pub id: String,
-    pub email: String,
-    pub name: String,
-    pub picture: String,
-}
 
 #[derive(Debug, Clone)]
 pub struct User {
@@ -35,7 +28,7 @@ pub struct User {
 
 
 /// Database wrapper that provides an interface for player management.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Database {
     pub pool: Arc<SqlitePool>,
 }
@@ -324,5 +317,284 @@ impl Database {
             row.get("has_floorplan"),
             row.get("floorplan_id"),
         ))
+    }
+
+    /// Gets a tour with all its scenes and connections for the editor
+    /// 
+    /// # Arguments
+    /// * `username` - The owner's username.
+    /// * `tour_id` - The ID of the tour to get.
+    /// 
+    /// # Returns
+    /// * `Ok(Some(TourData))` - The tour data with scenes and connections.
+    /// * `Ok(None)` - If the tour doesn't exist or doesn't belong to the user.
+    /// * `Err(sqlx::Error)` - If the query fails.
+    pub async fn get_tour_with_scenes(&self, username: &str, tour_id: i64) -> Result<Option<serde_json::Value>, sqlx::Error> {
+        // First get the tour
+        let tour_row = sqlx::query("SELECT id, tour_name, created_at, modified_at, initial_scene_id, location, has_floorplan, floorplan_id
+                                   FROM tours WHERE id = ?1 AND owner = ?2")
+            .bind(tour_id)
+            .bind(username)
+            .fetch_optional(&*self.pool)
+            .await?;
+
+        if let Some(tour_row) = tour_row {
+            // Get all scenes for this tour
+            let scene_rows = sqlx::query("SELECT id, name, file_path, description, initial_view_x, initial_view_y, north_dir
+                                         FROM assets WHERE tour_id = ?1 AND is_scene = 1")
+                .bind(tour_id)
+                .fetch_all(&*self.pool)
+                .await?;
+
+            let mut scenes = Vec::new();
+            for scene_row in scene_rows {
+                let scene_id: i64 = scene_row.get("id");
+                
+                // Get connections for this scene
+                let connection_rows = sqlx::query("SELECT id, end_id, screen_loc_x, screen_loc_y
+                                                  FROM connections WHERE tour_id = ?1 AND start_id = ?2")
+                    .bind(tour_id)
+                    .bind(scene_id)
+                    .fetch_all(&*self.pool)
+                    .await?;
+
+                let mut connections = Vec::new();
+                for conn_row in connection_rows {
+                    connections.push(serde_json::json!({
+                        "id": conn_row.get::<i64, _>("id"),
+                        "target_scene_id": conn_row.get::<Option<i64>, _>("end_id"),
+                        "position": [
+                            conn_row.get::<i64, _>("screen_loc_x"),
+                            conn_row.get::<i64, _>("screen_loc_y")
+                        ]
+                    }));
+                }
+
+                scenes.push(serde_json::json!({
+                    "id": scene_id,
+                    "name": scene_row.get::<String, _>("name"),
+                    "file_path": scene_row.get::<Option<String>, _>("file_path"),
+                    "description": scene_row.get::<Option<String>, _>("description"),
+                    "initial_view_x": scene_row.get::<i64, _>("initial_view_x"),
+                    "initial_view_y": scene_row.get::<i64, _>("initial_view_y"),
+                    "north_dir": scene_row.get::<Option<i64>, _>("north_dir"),
+                    "connections": connections
+                }));
+            }
+
+            let tour_data = serde_json::json!({
+                "id": tour_row.get::<i64, _>("id"),
+                "name": tour_row.get::<String, _>("tour_name"),
+                "location": tour_row.get::<Option<String>, _>("location"),
+                "created_at": tour_row.get::<String, _>("created_at"),
+                "modified_at": tour_row.get::<String, _>("modified_at"),
+                "initial_scene_id": tour_row.get::<i64, _>("initial_scene_id"),
+                "scenes": scenes
+            });
+
+            Ok(Some(tour_data))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Saves a scene to the database
+    /// 
+    /// # Arguments
+    /// * `tour_id` - The ID of the tour this scene belongs to
+    /// * `name` - The scene name
+    /// * `file_path` - The path to the scene image file
+    /// * `initial_view_x` - Initial view X coordinate (optional)
+    /// * `initial_view_y` - Initial view Y coordinate (optional) 
+    /// * `north_direction` - North direction in degrees (optional)
+    /// 
+    /// # Returns
+    /// * `Ok(i64)` - The database ID of the inserted scene
+    /// * `Err(sqlx::Error)` - If the insertion fails
+    pub async fn save_scene(&self, tour_id: i64, name: &str, file_path: &str, 
+                           initial_view_x: Option<i32>, initial_view_y: Option<i32>, 
+                           north_direction: Option<i8>) -> Result<i64, sqlx::Error> {
+        let result = sqlx::query("INSERT INTO assets (tour_id, name, file_path, is_scene, initial_view_x, initial_view_y, north_dir) 
+                                 VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6)")
+            .bind(tour_id)
+            .bind(name)
+            .bind(file_path)
+            .bind(initial_view_x.unwrap_or(0))
+            .bind(initial_view_y.unwrap_or(0))
+            .bind(north_direction.map(|d| d as i64))
+            .execute(&*self.pool)
+            .await?;
+
+        Ok(result.last_insert_rowid())
+    }
+
+    /// Updates an existing scene in the database
+    pub async fn update_scene(&self, scene_db_id: i64, name: Option<&str>, file_path: Option<&str>, 
+                             initial_view_x: Option<i32>, initial_view_y: Option<i32>, 
+                             north_direction: Option<i8>) -> Result<(), sqlx::Error> {
+        let mut query = "UPDATE assets SET modified_at = CURRENT_TIMESTAMP".to_string();
+        let mut bindings = Vec::new();
+        let mut param_count = 1;
+
+        if let Some(name) = name {
+            query.push_str(&format!(", name = ?{}", param_count));
+            bindings.push(name.to_string());
+            param_count += 1;
+        }
+        if let Some(file_path) = file_path {
+            query.push_str(&format!(", file_path = ?{}", param_count));
+            bindings.push(file_path.to_string());
+            param_count += 1;
+        }
+        if let Some(x) = initial_view_x {
+            query.push_str(&format!(", initial_view_x = ?{}", param_count));
+            bindings.push(x.to_string());
+            param_count += 1;
+        }
+        if let Some(y) = initial_view_y {
+            query.push_str(&format!(", initial_view_y = ?{}", param_count));
+            bindings.push(y.to_string());
+            param_count += 1;
+        }
+        if let Some(dir) = north_direction {
+            query.push_str(&format!(", north_dir = ?{}", param_count));
+            bindings.push((dir as i64).to_string());
+            param_count += 1;
+        }
+
+        query.push_str(&format!(" WHERE id = ?{}", param_count));
+        bindings.push(scene_db_id.to_string());
+
+        let mut sql_query = sqlx::query(&query);
+        for binding in bindings.iter().take(bindings.len() - 1) {
+            sql_query = sql_query.bind(binding);
+        }
+        sql_query = sql_query.bind(scene_db_id);
+
+        sql_query.execute(&*self.pool).await?;
+        Ok(())
+    }
+
+    /// Deletes a scene from the database
+    pub async fn delete_scene(&self, scene_db_id: i64) -> Result<(), sqlx::Error> {
+        // First delete all connections involving this scene
+        sqlx::query("DELETE FROM connections WHERE start_id = ?1 OR end_id = ?1")
+            .bind(scene_db_id)
+            .execute(&*self.pool)
+            .await?;
+
+        // Then delete the scene
+        sqlx::query("DELETE FROM assets WHERE id = ?1")
+            .bind(scene_db_id)
+            .execute(&*self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Saves a connection to the database
+    /// 
+    /// # Arguments
+    /// * `tour_id` - The ID of the tour this connection belongs to
+    /// * `start_scene_db_id` - The database ID of the starting scene
+    /// * `end_scene_db_id` - The database ID of the target scene (optional for closeups)
+    /// * `screen_loc_x` - X coordinate of the connection on screen
+    /// * `screen_loc_y` - Y coordinate of the connection on screen
+    /// * `is_transition` - Whether this is a scene transition (true) or closeup (false)
+    /// 
+    /// # Returns
+    /// * `Ok(i64)` - The database ID of the inserted connection
+    /// * `Err(sqlx::Error)` - If the insertion fails
+    pub async fn save_connection(&self, tour_id: i64, start_scene_db_id: i64, end_scene_db_id: Option<i64>,
+                                screen_loc_x: i32, screen_loc_y: i32, is_transition: bool) -> Result<i64, sqlx::Error> {
+        let result = sqlx::query("INSERT INTO connections (tour_id, start_id, end_id, screen_loc_x, screen_loc_y, is_transition) 
+                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)")
+            .bind(tour_id)
+            .bind(start_scene_db_id)
+            .bind(end_scene_db_id)
+            .bind(screen_loc_x)
+            .bind(screen_loc_y)
+            .bind(is_transition)
+            .execute(&*self.pool)
+            .await?;
+
+        Ok(result.last_insert_rowid())
+    }
+
+    /// Updates an existing connection in the database
+    pub async fn update_connection(&self, connection_db_id: i64, end_scene_db_id: Option<i64>,
+                                  screen_loc_x: Option<i32>, screen_loc_y: Option<i32>) -> Result<(), sqlx::Error> {
+        let mut query = "UPDATE connections SET".to_string();
+        let mut bindings = Vec::new();
+        let mut param_count = 1;
+        let mut first = true;
+
+        if let Some(end_id) = end_scene_db_id {
+            if !first { query.push(','); }
+            query.push_str(&format!(" end_id = ?{}", param_count));
+            bindings.push(end_id.to_string());
+            param_count += 1;
+            first = false;
+        }
+        if let Some(x) = screen_loc_x {
+            if !first { query.push(','); }
+            query.push_str(&format!(" screen_loc_x = ?{}", param_count));
+            bindings.push(x.to_string());
+            param_count += 1;
+            first = false;
+        }
+        if let Some(y) = screen_loc_y {
+            if !first { query.push(','); }
+            query.push_str(&format!(" screen_loc_y = ?{}", param_count));
+            bindings.push(y.to_string());
+            param_count += 1;
+        }
+
+        query.push_str(&format!(" WHERE id = ?{}", param_count));
+        bindings.push(connection_db_id.to_string());
+
+        let mut sql_query = sqlx::query(&query);
+        for binding in bindings.iter().take(bindings.len() - 1) {
+            sql_query = sql_query.bind(binding);
+        }
+        sql_query = sql_query.bind(connection_db_id);
+
+        sql_query.execute(&*self.pool).await?;
+        Ok(())
+    }
+
+    /// Deletes a connection from the database
+    pub async fn delete_connection(&self, connection_db_id: i64) -> Result<(), sqlx::Error> {
+        sqlx::query("DELETE FROM connections WHERE id = ?1")
+            .bind(connection_db_id)
+            .execute(&*self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Saves a closeup asset to the database
+    pub async fn save_closeup(&self, tour_id: i64, name: &str, file_path: &str, description: &str) -> Result<i64, sqlx::Error> {
+        let result = sqlx::query("INSERT INTO assets (tour_id, name, file_path, description, is_scene) 
+                                 VALUES (?1, ?2, ?3, ?4, 0)")
+            .bind(tour_id)
+            .bind(name)
+            .bind(file_path)
+            .bind(description)
+            .execute(&*self.pool)
+            .await?;
+
+        Ok(result.last_insert_rowid())
+    }
+
+    /// Gets a scene database ID by tour ID and scene UUID
+    pub async fn get_scene_db_id(&self, tour_id: i64, scene_name: &str) -> Result<Option<i64>, sqlx::Error> {
+        let row = sqlx::query("SELECT id FROM assets WHERE tour_id = ?1 AND name = ?2 AND is_scene = 1")
+            .bind(tour_id)
+            .bind(scene_name)
+            .fetch_optional(&*self.pool)
+            .await?;
+
+        Ok(row.map(|r| r.get("id")))
     }
 }

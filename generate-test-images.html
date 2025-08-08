@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generate Test Panoramic Images</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        canvas {
+            border: 1px solid #ccc;
+            margin: 10px 0;
+        }
+        .download-btn {
+            background: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        .download-btn:hover {
+            background: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <h1>Generate Test Panoramic Images</h1>
+    <p>This tool generates simple test panoramic images in equirectangular format (2:1 aspect ratio) for testing the virtual tour editor.</p>
+    
+    <div>
+        <button class="download-btn" onclick="generateAndDownload('living-room')">Generate Living Room</button>
+        <button class="download-btn" onclick="generateAndDownload('bedroom')">Generate Bedroom</button>
+        <button class="download-btn" onclick="generateAndDownload('kitchen')">Generate Kitchen</button>
+        <button class="download-btn" onclick="generateAndDownload('outdoor')">Generate Outdoor</button>
+    </div>
+    
+    <canvas id="canvas" width="2048" height="1024" style="width: 100%; max-width: 600px;"></canvas>
+    
+    <script>
+        function generatePanorama(type) {
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, width, height);
+            
+            // Color schemes for different room types
+            const colorSchemes = {
+                'living-room': {
+                    floor: '#8B4513',
+                    wall: '#F5F5DC',
+                    ceiling: '#FFFFFF',
+                    accent: '#4682B4'
+                },
+                'bedroom': {
+                    floor: '#DEB887',
+                    wall: '#E6E6FA',
+                    ceiling: '#F8F8FF',
+                    accent: '#CD853F'
+                },
+                'kitchen': {
+                    floor: '#696969',
+                    wall: '#F0F8FF',
+                    ceiling: '#FFFFFF',
+                    accent: '#32CD32'
+                },
+                'outdoor': {
+                    floor: '#228B22',
+                    wall: '#87CEEB',
+                    ceiling: '#87CEEB',
+                    accent: '#FFD700'
+                }
+            };
+            
+            const colors = colorSchemes[type] || colorSchemes['living-room'];
+            
+            // Create gradient for sky/ceiling
+            const skyGradient = ctx.createLinearGradient(0, 0, 0, height * 0.3);
+            skyGradient.addColorStop(0, colors.ceiling);
+            skyGradient.addColorStop(1, colors.wall);
+            
+            ctx.fillStyle = skyGradient;
+            ctx.fillRect(0, 0, width, height * 0.3);
+            
+            // Create gradient for walls
+            const wallGradient = ctx.createLinearGradient(0, height * 0.3, 0, height * 0.7);
+            wallGradient.addColorStop(0, colors.wall);
+            wallGradient.addColorStop(0.5, colors.accent);
+            wallGradient.addColorStop(1, colors.wall);
+            
+            ctx.fillStyle = wallGradient;
+            ctx.fillRect(0, height * 0.3, width, height * 0.4);
+            
+            // Create gradient for floor
+            const floorGradient = ctx.createLinearGradient(0, height * 0.7, 0, height);
+            floorGradient.addColorStop(0, colors.wall);
+            floorGradient.addColorStop(1, colors.floor);
+            
+            ctx.fillStyle = floorGradient;
+            ctx.fillRect(0, height * 0.7, width, height * 0.3);
+            
+            // Add some simple features
+            addRoomFeatures(ctx, width, height, type, colors);
+            
+            // Add grid lines for reference
+            addGridLines(ctx, width, height);
+            
+            return canvas;
+        }
+        
+        function addRoomFeatures(ctx, width, height, type, colors) {
+            ctx.fillStyle = colors.accent;
+            
+            // Add some simple geometric features based on room type
+            switch(type) {
+                case 'living-room':
+                    // Add windows
+                    ctx.fillStyle = '#87CEEB';
+                    ctx.fillRect(width * 0.2, height * 0.35, width * 0.15, height * 0.25);
+                    ctx.fillRect(width * 0.65, height * 0.35, width * 0.15, height * 0.25);
+                    
+                    // Add furniture silhouettes
+                    ctx.fillStyle = '#654321';
+                    ctx.fillRect(width * 0.45, height * 0.6, width * 0.1, height * 0.1);
+                    break;
+                    
+                case 'bedroom':
+                    // Add bed
+                    ctx.fillStyle = '#800080';
+                    ctx.fillRect(width * 0.4, height * 0.55, width * 0.2, height * 0.15);
+                    
+                    // Add window
+                    ctx.fillStyle = '#87CEEB';
+                    ctx.fillRect(width * 0.7, height * 0.35, width * 0.12, height * 0.2);
+                    break;
+                    
+                case 'kitchen':
+                    // Add cabinets
+                    ctx.fillStyle = '#8B4513';
+                    ctx.fillRect(width * 0.1, height * 0.45, width * 0.8, height * 0.15);
+                    
+                    // Add appliances
+                    ctx.fillStyle = '#C0C0C0';
+                    ctx.fillRect(width * 0.15, height * 0.45, width * 0.1, height * 0.15);
+                    ctx.fillRect(width * 0.75, height * 0.45, width * 0.1, height * 0.15);
+                    break;
+                    
+                case 'outdoor':
+                    // Add trees
+                    ctx.fillStyle = '#228B22';
+                    for(let i = 0; i < 5; i++) {
+                        const x = (width / 6) * (i + 1);
+                        ctx.fillRect(x - 10, height * 0.3, 20, height * 0.4);
+                        ctx.beginPath();
+                        ctx.arc(x, height * 0.3, 30, 0, 2 * Math.PI);
+                        ctx.fill();
+                    }
+                    
+                    // Add sun
+                    ctx.fillStyle = '#FFD700';
+                    ctx.beginPath();
+                    ctx.arc(width * 0.8, height * 0.15, 40, 0, 2 * Math.PI);
+                    ctx.fill();
+                    break;
+            }
+        }
+        
+        function addGridLines(ctx, width, height) {
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.lineWidth = 1;
+            
+            // Vertical lines every 30 degrees (width/12)
+            for(let i = 0; i <= 12; i++) {
+                const x = (width / 12) * i;
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, height);
+                ctx.stroke();
+            }
+            
+            // Horizontal lines
+            for(let i = 0; i <= 4; i++) {
+                const y = (height / 4) * i;
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(width, y);
+                ctx.stroke();
+            }
+        }
+        
+        function generateAndDownload(type) {
+            const canvas = generatePanorama(type);
+            
+            // Convert to blob and download
+            canvas.toBlob(function(blob) {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `${type}-panorama.jpg`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 'image/jpeg', 0.9);
+        }
+        
+        // Generate a default panorama on load
+        window.onload = function() {
+            generatePanorama('living-room');
+        };
+    </script>
+</body>
+</html>

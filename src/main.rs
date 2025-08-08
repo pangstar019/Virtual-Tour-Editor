@@ -17,7 +17,7 @@ use tour::Tour;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
-        State, Path,
+        State, Path, DefaultBodyLimit,
     },
     response::{Html, IntoResponse},
     Json,
@@ -82,22 +82,8 @@ enum ClientMessage {
     Help,
     ShowTours,
     CreateTour { name: String, location: String },
-    EditTour { tour_id: String },
+    EditTour { tour_id: String, editor_action: Option<editor::EditorAction> },
     DeleteTour { tour_id: String },
-    AddScene { name: String, file_path: String },
-    SwapScene { scene_id: String, new_file_path: String },
-    DeleteScene { scene_id: String },
-    AddCloseup { name: String, file_path: String, parent_scene_id: String, position: (i8, i8), description: String},
-    AddConnection { start_scene_id: String, asset_id: String, position: (i8, i8) },
-    EditConnection { connection_id: String, new_asset_id: String, new_position: (i8, i8) },
-    DeleteConnection { connection_id: String },
-    SetInitialView { scene_id: String, position: (i8, i8) },
-    SetNorthDirection { scene_id: String, direction: i8 },
-    ChangeAddress { address: String },
-    AddFloorplan { file_path: String },
-    DeleteFloorplan { floorplan_id: String },
-    AddFloorplanConnection { scene_id: String },
-    DeleteFloorplanConnection { scene_id: String },
 }
 
 #[tokio::main]
@@ -142,6 +128,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/tours", get(get_tours_handler))
         .route("/api/tours", post(create_tour_handler))
         .route("/api/tours/:id", delete(delete_tour_handler))
+        // Upload route
+        .route("/upload-asset", post(editor::upload_asset_handler))
         // Static HTML pages
         .route("/", get(index_page))
         .route("/login", get(login_page))
@@ -149,8 +137,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/editor", get(editor_page))
         // Static file serving
         .nest_service("/static", ServeDir::new("static"))
+        .nest_service("/assets", ServeDir::new("assets"))
         .layer(
             ServiceBuilder::new()
+                .layer(DefaultBodyLimit::max(100 * 1024 * 1024)) // 100MB limit
                 .layer(CorsLayer::permissive())
         )
         .with_state(app_state);
@@ -441,6 +431,61 @@ async fn handle_client(user: User, db: Arc<Database>) -> bool {
                         // Update session activity
                         if let Some(ref session_token) = user.session_token {
                             let _ = db.validate_session(&user.name, session_token).await;
+                        }
+                    }
+                    Ok(ClientMessage::EditTour { tour_id, editor_action }) => {
+                        if let Ok(tour_id_num) = tour_id.parse::<i64>() {
+                            // Check if this is the initial tour load or an editor action
+                            match editor_action {
+                                None => {
+                                    // Initial tour load - return tour data and start editor session
+                                    match db.get_tour_with_scenes(&user.name, tour_id_num).await {
+                                        Ok(Some(tour_data)) => {
+                                            let response = serde_json::json!({
+                                                "type": "tour_data",
+                                                "data": tour_data
+                                            });
+                                            let _ = tx.send(Message::Text(response.to_string()));
+                                            
+                                            // Initialize editor state
+                                            let mut editor_state = editor::EditorState::new(tour_id.clone(), tour_id_num, user.name.clone(), Some((*db).clone()));
+                                            let _ = editor_state.load_from_database(&db).await;
+                                            
+                                            // Start editor session
+                                            let response = serde_json::json!({
+                                                "type": "editor_ready",
+                                                "state": editor_state.to_json()
+                                            });
+                                            let _ = tx.send(Message::Text(response.to_string()));
+                                        }
+                                        Ok(None) => {
+                                            let _ = tx.send(Message::Text(r#"{"type": "error", "message": "Tour not found or access denied."}"#.to_string()));
+                                        }
+                                        Err(e) => {
+                                            eprintln!("Failed to get tour data: {}", e);
+                                            let _ = tx.send(Message::Text(r#"{"type": "error", "message": "Failed to load tour data."}"#.to_string()));
+                                        }
+                                    }
+                                }
+                                Some(action) => {
+                                    // Handle editor action
+                                    let mut editor_state = editor::EditorState::new(tour_id.clone(), tour_id_num, user.name.clone(), Some((*db).clone()));
+                                    let _ = editor_state.load_from_database(&db).await;
+                                    
+                                    match editor_state.handle_action(action, &tx).await {
+                                        Ok(_) => {
+                                            // Save changes to database
+                                            let _ = editor_state.save_to_database(&db).await;
+                                        }
+                                        Err(e) => {
+                                            eprintln!("Editor action failed: {}", e);
+                                            let _ = tx.send(Message::Text(r#"{"type": "error", "message": "Editor action failed."}"#.to_string()));
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            let _ = tx.send(Message::Text(r#"{"type": "error", "message": "Invalid tour ID."}"#.to_string()));
                         }
                     }
                     _ => {

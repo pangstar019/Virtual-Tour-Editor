@@ -4,934 +4,160 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>7 Card Stud Poker</title>
-    <style>
-        body,
-        html {
-            margin: 0;
-            padding: 0;
-            height: 100%;
-            width: 100%;
-            font-family: Arial, sans-serif;
-            color: white;
-            overflow: hidden;
-            user-select: none;
-        }
-
-        .game-container {
-            position: relative;
-            width: 100%;
-            height: 100%;
-            background-color: #15803d;
-            background-image: radial-gradient(circle, #2c9652 0%, #15803d 100%);
-            overflow: hidden;
-        }
-
-        .table {
-            position: absolute;
-            width: 90%;
-            height: 80%;
-            top: 10%;
-            left: 5%;
-            border-radius: 50%;
-            background-color: #106431;
-            box-shadow: inset 0 0 50px rgba(0, 0, 0, 0.4), 0 0 20px rgba(0, 0, 0, 0.6);
-            border: 15px solid #8B4513;
-        }
-
-        .pot {
-            position: absolute;
-            top: 45%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            font-size: 24px;
-            font-weight: bold;
-            text-shadow: 1px 1px 3px rgba(0, 0, 0, 0.8);
-            background-color: rgba(0, 0, 0, 0.3);
-            padding: 10px 20px;
-            border-radius: 10px;
-        }
-
-        .game-status {
-            position: absolute;
-            top: 10px;
-            left: 50%;
-            transform: translateX(-50%);
-            font-size: 18px;
-            background-color: rgba(0, 0, 0, 0.5);
-            padding: 8px 15px;
-            border-radius: 5px;
-            z-index: 10;
-        }
-
-        .player-positions {
-            position: absolute;
-            width: 100%;
-            height: 100%;
-        }
-
-        .player-spot {
-            position: absolute;
-            width: 150px;
-            padding: 10px;
-            background-color: rgba(0, 0, 0, 0.4);
-            border-radius: 10px;
-            text-align: center;
-            transition: all 0.3s ease;
-        }
-
-        .player-spot.player-turn {
-            background-color: rgba(255, 215, 0, 0.2);
-            box-shadow: 0 0 15px rgba(255, 215, 0, 0.5);
-        }
-
-        .player-spot.current-player {
-            background-color: rgba(0, 127, 255, 0.2);
-        }
-
-        .player-name {
-            font-weight: bold;
-            margin-bottom: 5px;
-        }
-
-        .player-chips {
-            font-size: 12px;
-            margin-bottom: 10px;
-        }
-
-        .player-cards {
-            display: flex;
-            justify-content: center;
-            flex-wrap: wrap;
-            gap: 5px;
-        }
-
-        .card {
-            width: 35px;
-            height: 50px;
-            background-color: white;
-            color: black;
-            border-radius: 3px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            font-size: 14px;
-            box-shadow: 1px 1px 3px rgba(0, 0, 0, 0.3);
-            position: relative;
-            transition: transform 0.2s;
-        }
-
-        .card.red-card {
-            color: red;
-        }
-
-        .card.facedown {
-            background-color: #1c3b6a;
-            background-image: repeating-linear-gradient(45deg, #1c3b6a, #1c3b6a 5px, #2a4c9b 5px, #2a4c9b 10px);
-            color: transparent;
-        }
-
-        .card.dealing {
-            animation: deal-card 0.3s ease-out;
-        }
-
-        .player-folded .player-cards {
-            opacity: 0.5;
-        }
-
-        .folded-indicator {
-            color: #ff6b6b;
-            font-weight: bold;
-            margin-bottom: 5px;
-        }
-
-        .winner {
-            animation: winner-glow 1.5s infinite;
-        }
-
-        .winner-label {
-            position: absolute;
-            top: -25px;
-            left: 50%;
-            transform: translateX(-50%);
-            background-color: gold;
-            color: black;
-            font-weight: bold;
-            padding: 4px 12px;
-            border-radius: 4px;
-            animation: winner-bounce 1s infinite;
-            z-index: 11;
-            font-size: 16px;
-            box-shadow: 0 0 10px rgba(0,0,0,0.5);
-        }
-
-        .hand-type {
-            margin-bottom: 5px;
-            font-style: italic;
-            font-size: 12px;
-        }
-
-        @keyframes deal-card {
-            0% {
-                transform: translateY(-50px) rotate(-10deg);
-                opacity: 0;
-            }
-
-            100% {
-                transform: translateY(0) rotate(0);
-                opacity: 1;
-            }
-        }
-
-        @keyframes winner-glow {
-            0% {
-                box-shadow: 0 0 5px gold;
-            }
-
-            50% {
-                box-shadow: 0 0 20px gold;
-            }
-
-            100% {
-                box-shadow: 0 0 5px gold;
-            }
-        }
-
-        .card-selection-container {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background-color: rgba(0, 0, 0, 0.8);
-            padding: 20px;
-            border-radius: 10px;
-            z-index: 100;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 15px;
-        }
-
-        .card-selection-title {
-            font-size: 18px;
-            margin-bottom: 10px;
-        }
-
-        .card-selection-grid {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 10px;
-        }
-
-        .selectable-card {
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
-
-        .selectable-card:hover {
-            transform: translateY(-5px);
-        }
-
-        .selectable-card.selected {
-            outline: 2px solid gold;
-            transform: translateY(-10px);
-        }
-
-        .draw-actions {
-            display: flex;
-            gap: 10px;
-        }
-
-        .draw-button {
-            padding: 8px 15px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: bold;
-        }
-
-        .draw-submit {
-            background-color: #4CAF50;
-            color: white;
-        }
-
-        .draw-cancel {
-            background-color: #607D8B;
-            color: white;
-        }
-
-        .player-hand.winner {
-            border: 2px solid gold;
-            background-color: rgba(255, 215, 0, 0.1);
-        }
-
-        .player-hand.folded {
-            opacity: 0.7;
-        }
-
-        .folded-card {
-            opacity: 0.5;
-        }
-
-        #pot-container, #turn-container {
-            margin: 10px 0;
-            padding: 8px;
-            background-color: #f0f8ff;
-            border: 1px solid #b0c4de;
-            border-radius: 4px;
-            display: flex;
-            justify-content: center;
-        }
-    </style>
+    <title>Virtual Tour Editor</title>
+    <link rel="stylesheet" href="/static/css/editor.css">
 </head>
 
 <body>
-    <div class="game-container">
-        <div id="gameStatus" class="game-status">Waiting for players...</div>
-        <div class="table">
-            <div class="pot">Pot: $<span id="potValue">0</span></div>
-            <div id="playerPositions" class="player-positions"></div>
+    <div class="editor-container">
+        <!-- Side Panel -->
+        <div class="side-panel">
+            <div class="panel-header">
+                <div class="panel-title" id="tour-title">Virtual Tour Editor</div>
+                <div class="panel-subtitle" id="tour-subtitle">Loading tour...</div>
+            </div>
+
+            <div class="panel-content">
+                <!-- Scene Management Section -->
+                <div class="section">
+                    <div class="section-header">
+                        <div class="section-title">
+                            📷 Add Scenes
+                        </div>
+                        <button class="add-scene-btn" onclick="showAddSceneModal()">
+                            ➕ Add Scenes
+                        </button>
+                    </div>
+                    <div class="scene-list" id="scene-list">
+                        <!-- Scene items will be populated here -->
+                    </div>
+                </div>
+
+                <!-- Tools Section -->
+                <div class="section">
+                    <div class="section-header">
+                        <div class="section-title">
+                            🔧 Fast Rename
+                        </div>
+                        <button class="add-scene-btn" onclick="fastRename()">
+                            ✏️ Fast Rename
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Sort Section -->
+                <div class="section">
+                    <div class="section-header">
+                        <div class="section-title">
+                            � Sort Scenes
+                        </div>
+                        <button class="add-scene-btn" onclick="sortScenes()">
+                            💲 Sort Scenes
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Viewer -->
+        <div class="main-viewer">
+            <canvas id="viewer-canvas"></canvas>
+            
+            <!-- Top Toolbar -->
+            <div class="top-toolbar">
+                <div class="toolbar-left">
+                    <div class="tour-title" id="current-scene-name">Loading...</div>
+                    <div class="tour-info" id="tour-info">Preparing virtual tour editor</div>
+                </div>
+                <div class="toolbar-right">
+                    <button class="btn small" onclick="resetView()">🎯</button>
+                    <button class="btn small" onclick="toggleFullscreen()">⛶</button>
+                </div>
+            </div>
+
+            <!-- Bottom Toolbar -->
+            <div class="bottom-toolbar">
+                <button class="toolbar-btn" onclick="addInfospot()">📍 Add Infospot</button>
+                <button class="toolbar-btn" id="link-hotspot-btn" onclick="toggleHotspotMode()">🔗 Link Hotspot</button>
+                <button class="toolbar-btn" onclick="setInitialView()">👁️ Set Initial View</button>
+                <button class="toolbar-btn" onclick="previewTour()">▶️ Preview</button>
+            </div>
+
+            <!-- Hotspot Creation Mode Indicator -->
+            <div class="hotspot-creation-mode" id="hotspot-mode" style="display: none;">
+                Click on the panorama to create a connection hotspot
+            </div>
+
+            <!-- Loading Indicator -->
+            <div class="loading" id="loading-indicator">
+                <div class="spinner"></div>
+                <div>Loading virtual tour...</div>
+            </div>
         </div>
     </div>
 
-    <script>
-        // Game state constants
-        const DEAL_PHASE = 3;
-        const BRING_IN_PHASE = 4;
-        const BETTING_ROUND = 5;
-        const SHOWDOWN_PHASE = 7;
-
-        // Game state variables
-        let gameState = 0;
-        let selectedCards = [];
-        let drawingCompleted = false;
-        let showdownData = null;
-        let isSpectator = false;
-        
-        // DOM elements
-        const gameStatus = document.getElementById('gameStatus');
-        const playerPositions = document.getElementById('playerPositions');
-        const potValue = document.getElementById('potValue');
-
-        // Player elements mapping
-        const playerElements = {};
-
-        // Handle messages from parent frame
-        window.addEventListener('message', function (event) {
-            console.log("Received message:", event.data);
-            if (event.data.type === 'command') {
-                handleMessage(event.data);
-            }
-        });
-
-        // Message handler
-        function handleMessage(data) {
-            if (data.command === "updatePlayers") {
-                updatePlayers(data.data.players, data.data.spectators, data.data.gameActive);
-            } else if (data.command === "startGame") {
-                startGame(data.data);
-            } else if (data.command === "updateGameInfo") {
-                console.log("Game info received: ", data.data);
-                updateGameInfo(data.data);
-            } else if (data.command === "showdownHands") {
-                handleShowdownData(data.data);
-            }
-        }
-
-        // Send messages to parent
-        function sendToParent(command, data) {
-            window.parent.postMessage({
-                type: "sendWebSocket",
-                data: JSON.stringify({
-                    action: command,
-                    ...data
-                })
-            }, "*");
-        }
-
-        // Submit card exchange
-        function submitCardExchange() {
-            console.log("Submitting card exchange, selected indices:", selectedCards);
-
-            sendToParent("DrawCards", {
-                action: "DrawCards",
-                cardIndices: selectedCards
-            });
-
-            drawingCompleted = true;
-            hideCardSelectionUI();
-            gameStatus.textContent = "Waiting for other players...";
-        }
-
-        // Update game info
-        function updateGameInfo(data) {
-            // Update pot value if provided
-            if (data && data.pot !== undefined) {
-                potValue.textContent = data.pot;
-                console.log(`Updated pot to $${data.pot}`);
-            }
-
-            // Update game state if provided
-            if (data && data.gameState !== undefined) {
-                updateGameState(data.gameState);
-            }
-
-            // Update turn indicator if provided
-            if (data && data.currentPlayerTurn) {
-                // Remove turn highlight from all players
-                const allPlayerSpots = document.querySelectorAll('.player-spot');
-                allPlayerSpots.forEach(spot => {
-                    spot.classList.remove('player-turn');
-                });
-
-                // Find the player whose turn it is and highlight them
-                const currentTurnPlayer = data.currentPlayerTurn;
-                let playerFound = false;
-
-                allPlayerSpots.forEach(spot => {
-                    const nameElement = spot.querySelector('.player-name');
-                    if (nameElement && nameElement.textContent === currentTurnPlayer) {
-                        spot.classList.add('player-turn');
-                        playerFound = true;
-
-                        // Update game status text based on game state
-                        const isCurrentUser = currentTurnPlayer === localStorage.getItem('currentPlayerName');
-
-                        if (isCurrentUser) {
-                            gameStatus.textContent = `Your turn!`;
-                        } else {
-                            gameStatus.textContent = `${currentTurnPlayer}'s turn`;
-                        }
-                    }
-                });
-            }
-        }
-
-        // Update player information
-        function updatePlayers(players, spectators, gameActive) {
-            if (!players) {
-                console.log('Warning: players data is undefined');
-                return;
-            }
-
-            if (!Array.isArray(players)) {
-                console.log('Warning: players is not an array, attempting to fix');
-                if (typeof players === 'object') {
-                    players = [players];
-                } else {
-                    return;
-                }
-            }
-            
-            // Check if the current player is a spectator
-            const currentPlayerName = localStorage.getItem('currentPlayerName');
-            if (spectators) {
-                // Check if current player name is in the spectators list
-                isSpectator = spectators.some(spectator => 
-                    spectator.name === currentPlayerName
-                );
-            } else {
-                isSpectator = false;
-            }
-            console.log("Is current player a spectator:", isSpectator);
-
-            players.forEach(player => {
-                if (player.name == currentPlayerName) {
-                    // Find the player element for the current player
-                    const playerElement = playerElements[player.name];
-                    if (playerElement) {
-                        // Update the chips display for this player
-                        const chipsElement = playerElement.querySelector('.player-chips');
-                        if (chipsElement) {
-                            chipsElement.textContent = "$" + player.wallet;
-                        }
-                    }
-                }
-            });
-            
-            // Update player hands if we have hand data
-            const handsData = players
-                .filter(player => player.hand && player.hand.length > 0)
-                .map(player => ({
-                    playerName: player.name,
-                    hand: player.hand,
-                    state: player.state
-                }));
-
-            if (handsData.length > 0) {
-                updatePlayerHands(handsData);
-            }
-        }
-
-        // Position players around the table
-        function positionPlayers(players) {
-            console.log(`Positioning ${players.length} players`);
-
-            // Clear existing players
-            playerPositions.innerHTML = '';
-
-            // Get stored current player name
-            const storedCurrentPlayerName = localStorage.getItem('currentPlayerName');
-            console.log("Stored current player name: ", storedCurrentPlayerName);
-
-            // Find current player index in original array
-            let currentPlayerIndex = -1;
-            if (storedCurrentPlayerName) {
-                currentPlayerIndex = players.findIndex(p => p.name === storedCurrentPlayerName);
-            }
-
-            // If current player not found, use first player
-            if (currentPlayerIndex === -1) {
-                currentPlayerIndex = 0;
-            }
-
-            // Store player index mapping for later use
-            window.playerIndices = {};
-
-            // Position players around the table
-            const totalPlayers = players.length;
-            const angleStep = 360 / totalPlayers;
-
-            // Start positioning from the bottom (current player)
-            // and arrange other players clockwise
-            let startAngle = 90 - (currentPlayerIndex * angleStep);
-
-            players.forEach((player, index) => {
-                const angle = (startAngle + (index * angleStep)) % 360;
-                const playerSpot = createPlayerSpot(player, angle);
-
-                // Mark as current player if it's the user
-                if (player.name === storedCurrentPlayerName) {
-                    playerSpot.classList.add('current-player');
-                }
-
-                playerPositions.appendChild(playerSpot);
-
-                // Store reference to this player's DOM element
-                playerElements[player.name] = playerSpot;
-                window.playerIndices[player.name] = index;
-            });
-        }
-
-        // Create a player spot with calculated position
-        function createPlayerSpot(player, angle) {
-            const playerSpot = document.createElement('div');
-            playerSpot.className = 'player-spot';
-
-            // Create HTML for player info
-            playerSpot.innerHTML = `
-                <div class="player-name">${player.name}</div>
-                <div class="player-chips">$${player.chips || player.wallet || 1000}</div>
-                <div class="player-cards">
-                    <!-- Cards will be added dynamically -->
+    <!-- Add Scene Modal -->
+    <div id="add-scene-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">Add New Scene</div>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label" for="scene-name">Scene Name:</label>
+                    <input type="text" id="scene-name" class="form-input" placeholder="Enter scene name" />
                 </div>
-            `;
-
-            // Position based on angle
-            const radius = 40; // % of container
-            const radians = angle * (Math.PI / 180);
-            const x = 50 + radius * Math.cos(radians);
-            const y = 50 + radius * Math.sin(radians);
-
-            playerSpot.style.left = `${x}%`;
-            playerSpot.style.top = `${y}%`;
-            playerSpot.style.transform = 'translate(-50%, -50%)';
-
-            // Special styling for current player (bottom position)
-            if (angle === 90) {
-                playerSpot.style.bottom = '10px';
-                playerSpot.style.left = '50%';
-                playerSpot.style.top = 'auto';
-                playerSpot.style.transform = 'translateX(-50%)';
-            }
-
-            // Add default face down cards for 7 Card Stud
-            const cardsContainer = playerSpot.querySelector('.player-cards');
-            const gameIsActive = gameStatus.textContent !== 'Waiting for players...';
-
-            if (gameIsActive && (!player.hand || player.hand.length === 0)) {
-                // In 7 Card Stud, players initially get 3 cards (2 down, 1 up)
-                for (let i = 0; i < 3; i++) {
-                    const card = document.createElement('div');
-                    card.className = 'card facedown';
-                    card.textContent = '?';
-                    cardsContainer.appendChild(card);
-                }
-            }
-
-            return playerSpot;
-        }
-
-        // Start the game
-        function startGame(data) {
-            console.log('Starting game');
-            gameStatus.textContent = 'Game in progress...';
-
-            console.log("Game start data received:", data);
-
-            // Ensure data has valid players
-            let players = [];
-            if (data && Array.isArray(data.players)) {
-                players = data.players;
-            } else if (data && data.players) {
-                console.log('Player data exists but may have wrong format');
-                if (typeof data.players === 'object') {
-                    players = [data.players];
-                }
-            }
-
-            if (players.length === 0) {
-                console.log('Warning: No player data available for game start');
-                playerPositions.innerHTML = '';
-                return;
-            }
-
-            // Position players around the table
-            positionPlayers(players);
-
-            // Update player information including hands
-            updatePlayers(players);
-        }
-
-        // Update player hands
-        function updatePlayerHands(playersData) {
-            console.log("Updating player hands:", playersData);
-            
-            // Get current player name
-            const currentPlayerName = localStorage.getItem('currentPlayerName');
-            
-            playersData.forEach(playerData => {
-                // Find the player's UI element
-                const playerSpot = playerElements[playerData.playerName];
-                if (!playerSpot) return;
                 
-                const cardsContainer = playerSpot.querySelector('.player-cards');
-                if (!cardsContainer) return;
+                <!-- File Upload Area -->
+                <div class="form-group">
+                    <label class="form-label">Upload New 360° Image:</label>
+                    <div class="upload-area" onclick="document.getElementById('file-upload').click()">
+                        <div class="upload-icon">📁</div>
+                        <div class="upload-text">Click to upload or drag & drop</div>
+                        <div class="upload-hint">Supports JPG, PNG files (Equirectangular format)</div>
+                    </div>
+                    <input type="file" id="file-upload" class="file-input" accept="image/*" />
+                </div>
 
-                // Clear existing cards
-                cardsContainer.innerHTML = '';
-                
-                // Get hand and player state
-                const hand = playerData.hand || [];
-                const state = playerData.state;
-                
-                // Check if folded
-                if (state === 1) { // FOLDED
-                    const foldedDiv = document.createElement('div');
-                    foldedDiv.className = 'folded-indicator';
-                    foldedDiv.textContent = 'FOLDED';
-                    cardsContainer.appendChild(foldedDiv);
-                    playerSpot.classList.add('player-folded');
-                    return;
-                }
-                
-                // Remove folded class if exists
-                playerSpot.classList.remove('player-folded');
-                
-                // Determine if this is the current player
-                // const isCurrentPlayer = (playerData.playerName === currentPlayerName);
-                                // Determine if this is the current player or a spectator (who can see all cards)
-                let isCurrentPlayer = (playerData.playerName === currentPlayerName);
-                if (isSpectator) {
-                    isCurrentPlayer = true;
-                }
+                <div class="form-group">
+                    <label class="form-label">Or select from existing 360° images:</label>
+                    <div class="asset-grid" id="asset-grid">
+                        <!-- Asset items will be populated here -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn" onclick="closeAddSceneModal()">Cancel</button>
+                <button class="btn success" onclick="confirmAddScene()">Add Scene</button>
+            </div>
+        </div>
+    </div>
 
-                // Create and add cards
-                hand.forEach((cardValue, index) => {
-                    const card = document.createElement('div');
-                    
-                    // In 7-card stud, handle face up vs face down cards
-                    // Cards with values > 52 are face down
-                    if (cardValue > 52) {
-                        // Face down card for everyone
-                        card.className = 'card facedown';
-                        card.textContent = '?';
-                    } else {
-                        // Face up card
-                        card.className = `card ${getCardColor(cardValue)}`;
-                        card.textContent = cardToString(cardValue);
-                    }
-                    
-                    cardsContainer.appendChild(card);
-                });
-            });
-        }
+    <!-- Add Connection Modal -->
+    <div id="add-connection-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">Create Connection</div>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label" for="target-scene">Target Scene:</label>
+                    <select id="target-scene" class="form-input">
+                        <option value="">Select target scene...</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn" onclick="closeAddConnectionModal()">Cancel</button>
+                <button class="btn success" onclick="confirmAddConnection()">Create Connection</button>
+            </div>
+        </div>
+    </div>
 
-        // Add a function to handle the showdown state
-        function displayShowdownHands(hands) {
-            const container = document.getElementById("players-hands");
-            container.innerHTML = "";
-            
-            hands.forEach(playerData => {
-                const playerDiv = document.createElement("div");
-                playerDiv.className = "player-hand";
-                
-                // Highlight winners
-                if (playerData.winner) {
-                    playerDiv.classList.add("winner");
-                }
-                
-                // Create player name with hand type
-                const nameElement = document.createElement("div");
-                nameElement.className = "player-name";
-                
-                let nameText = playerData.playerName;
-                if (playerData.handName) {
-                    nameText += " - " + playerData.handName;
-                }
-                
-                // Show folded status
-                if (playerData.state === 1) {
-                    nameText += " (Folded)";
-                    playerDiv.classList.add("folded");
-                }
-                
-                nameElement.textContent = nameText;
-                playerDiv.appendChild(nameElement);
-                
-                // Create cards container - at showdown all cards are visible
-                const cardsDiv = document.createElement("div");
-                cardsDiv.className = "cards";
-                
-                // All cards are visible at showdown
-                if (playerData.hand) {
-                    playerData.hand.forEach(card => {
-                        // Convert any face-down cards (>52) to their actual values
-                        const actualCard = card > 52 ? card - 53 : card;
-                        cardsDiv.appendChild(createCardElement(actualCard));
-                    });
-                }
-                
-                playerDiv.appendChild(cardsDiv);
-                container.appendChild(playerDiv);
-            });
-        }
-
-        // Helper function to convert card value to string
-        function cardToString(cardValue) {
-            if (cardValue === undefined || cardValue === null) return '?';
-
-            const rank = cardValue % 13;
-            const suit = Math.floor(cardValue / 13);
-
-            let cardStr = '';
-
-            // Determine rank
-            if (rank === 0) {
-                cardStr += 'A';
-            } else if (rank <= 9) {
-                cardStr += (rank + 1).toString();
-            } else if (rank === 10) {
-                cardStr += 'J';
-            } else if (rank === 11) {
-                cardStr += 'Q';
-            } else if (rank === 12) {
-                cardStr += 'K';
-            }
-
-            // Determine suit
-            if (suit === 0) {
-                cardStr += '♥';
-            } else if (suit === 1) {
-                cardStr += '♦';
-            } else if (suit === 2) {
-                cardStr += '♠';
-            } else if (suit === 3) {
-                cardStr += '♣';
-            }
-            return cardStr;
-        }
-
-        // Helper function to determine card color based on suit
-        function getCardColor(cardValue) {
-            if (cardValue === undefined || cardValue === null) return '';
-
-            const suit = Math.floor(cardValue / 13);
-            // Hearts and diamonds are red, spades and clubs are black
-            return (suit === 0 || suit === 1) ? 'red-card' : 'black-card';
-        }
-
-        // Update game state
-        function updateGameState(newGameState) {
-            console.log("Game state updated to:", newGameState);
-
-            // If transitioning to JOINABLE (0), clear the game UI
-            if (newGameState === 0 && gameState !== 0) {
-                // Reset all game elements
-                clearGameState();
-            }
-
-            // Update the global game state
-            gameState = newGameState;
-        }
-
-        // Clear game state
-        function clearGameState() {
-            // Remove any active elements or highlights
-            document.querySelectorAll('.player-turn').forEach(el => el.classList.remove('player-turn'));
-            document.querySelectorAll('.winner').forEach(el => el.classList.remove('winner'));
-            document.querySelectorAll('.winner-label').forEach(el => el.remove());
-            document.querySelectorAll('.hand-type').forEach(el => el.remove());
-
-            // Clear the game status
-            gameStatus.textContent = 'Waiting for players to ready up...';
-
-            // Reset any game-specific flags
-            drawingCompleted = false;
-            selectedCards = [];
-            showdownData = null;
-        }
-
-        // Handle showdown data
-        function handleShowdownData(data) {
-            console.log("Showdown data received:", data);
-            showdownData = data;
-            // Create and display the showdown UI
-            displayShowdownResults();
-            
-            // If a winner message was provided, display it
-            if (data.winnerMessage) {
-                const gameStatus = document.getElementById('gameStatus');
-                gameStatus.textContent = data.winnerMessage;
-            }
-        }
-
-        // Function to display showdown results
-        function displayShowdownResults() {
-            if (!showdownData || !showdownData.hands || !showdownData.hands.length) {
-                console.error("Invalid showdown data:", showdownData);
-                return;
-            }
-            
-            console.log("Displaying showdown results:", showdownData);
-            
-            // Now reveal all cards and highlight winners
-            const playerSpots = document.querySelectorAll('.player-spot');
-            
-            playerSpots.forEach(spot => {
-                const nameElement = spot.querySelector('.player-name');
-                if (!nameElement) return;
-                
-                const playerName = nameElement.textContent;
-                const playerData = showdownData.hands.find(h => h.playerName === playerName);
-                
-                if (!playerData) return;
-                
-                // Get the cards container
-                const cardsContainer = spot.querySelector('.player-cards');
-                if (!cardsContainer) return;
-                
-                // Clear existing cards
-                cardsContainer.innerHTML = '';
-                
-                // Display all cards face up
-                if (playerData.hand && playerData.hand.length) {
-                    playerData.hand.forEach(cardValue => {
-                        const card = document.createElement('div');
-                        card.className = `card ${getCardColor(cardValue)}`;
-                        card.textContent = cardToString(cardValue);
-                        cardsContainer.appendChild(card);
-                    });
-                }
-                
-                // Check if this player is a winner
-                if (playerData.winner) {
-                    // Add winner class to highlight the entire player spot
-                    spot.classList.add('winner');
-                    
-                    // Make the player name stand out
-                    nameElement.style.color = 'gold';
-                    nameElement.style.fontWeight = 'bold';
-                    nameElement.textContent = `★ ${playerName} ★`;
-                    
-                    // Add winner indicator
-                    const winnerLabel = document.createElement('div');
-                    winnerLabel.className = 'winner-label';
-                    winnerLabel.textContent = 'WINNER!';
-                    spot.appendChild(winnerLabel);
-                    
-                    // Show pot amount won
-                    if (showdownData.pot) {
-                        const winningsLabel = document.createElement('div');
-                        winningsLabel.className = 'winnings-label';
-                        winningsLabel.textContent = `Won $${showdownData.pot}`;
-                        winningsLabel.style.color = '#4ade80';
-                        winningsLabel.style.fontWeight = 'bold';
-                        winningsLabel.style.marginTop = '5px';
-                        spot.appendChild(winningsLabel);
-                    }
-                }
-            });
-            
-            // Update game status with the winner message
-            if (showdownData.winnerMessage) {
-                gameStatus.textContent = showdownData.winnerMessage;
-            } else {
-                gameStatus.textContent = 'Showdown - Winner determined!';
-            }
-        }
-
-        // Utility function to compare hand ranks
-        function compareRanks(rank1, rank2) {
-            for (let i = 0; i < 6; i++) {
-                if (rank1[i] > rank2[i]) return 1;
-                if (rank1[i] < rank2[i]) return -1;
-            }
-            return 0;
-        }
-
-        // Add this function to each game HTML file if not already present
-        function createCardElement(cardValue) {
-            const cardElement = document.createElement("div");
-            cardElement.className = "card";
-            
-            if (cardValue === -1 || cardValue > 52) {
-                // Face down card
-                cardElement.classList.add("card-back");
-                cardElement.textContent = "";
-            } else {
-                // Face up card
-                const rank = cardValue % 13;
-                const suit = Math.floor(cardValue / 13);
-                
-                // Determine rank text
-                let rankText;
-                if (rank === 0) {
-                    rankText = "A";
-                } else if (rank === 10) {
-                    rankText = "J";
-                } else if (rank === 11) {
-                    rankText = "Q";
-                } else if (rank === 12) {
-                    rankText = "K";
-                } else {
-                    rankText = (rank + 1).toString();
-                }
-                
-                // Determine suit symbol
-                let suitSymbol;
-                let suitClass;
-                if (suit === 0) {
-                    suitSymbol = "♥";
-                    suitClass = "hearts";
-                } else if (suit === 1) {
-                    suitSymbol = "♦";
-                    suitClass = "diamonds";
-                } else if (suit === 2) {
-                    suitSymbol = "♠";
-                    suitClass = "spades";
-                } else {
-                    suitSymbol = "♣";
-                    suitClass = "clubs";
-                }
-                
-                cardElement.classList.add(suitClass);
-                cardElement.innerHTML = `<div class="card-value">${rankText}</div><div class="card-suit">${suitSymbol}</div>`;
-            }
-            
-            return cardElement;
-        }
-    </script>
+    <!-- Include Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="/static/js/app-base.js"></script>
+    <script src="/static/js/editor.js"></script>
 </body>
 
 </html>
