@@ -232,7 +232,7 @@ class VirtualTourEditor {
     
     onWheel(event) {
         const fov = this.camera.fov + event.deltaY * 0.05;
-        this.camera.fov = Math.max(10, Math.min(75, fov));
+        this.camera.fov = Math.max(10, Math.min(120, fov));
         this.camera.updateProjectionMatrix();
     }
     
@@ -302,6 +302,12 @@ class VirtualTourEditor {
         
         // Apply momentum when not actively dragging
         if (!this.isMouseDown && (Math.abs(this.momentum.x) > 0.005 || Math.abs(this.momentum.y) > 0.005)) {
+            const x_dir = this.momentum.x > 0 ? 1 : -1;
+            const y_dir = this.momentum.y > 0 ? 1 : -1;
+
+            this.momentum.x = Math.min(0.8, Math.abs(this.momentum.x)) * x_dir;
+            this.momentum.y = Math.min(0.8, Math.abs(this.momentum.y)) * y_dir;
+
             this.lon -= this.momentum.x;
             this.lat += this.momentum.y;
             

@@ -142,7 +142,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nest_service("/assets", ServeDir::new("assets"))
         .layer(
             ServiceBuilder::new()
-                .layer(DefaultBodyLimit::max(100 * 1024 * 1024)) // 100MB limit
+                .layer(DefaultBodyLimit::max(120 * 1024 * 1024)) // 100MB limit
                 .layer(CorsLayer::permissive())
         )
         .with_state(app_state);
