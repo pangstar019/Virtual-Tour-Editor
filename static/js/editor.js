@@ -31,6 +31,11 @@ class VirtualTourEditor {
         this.phi = 0;
         this.theta = 0;
         
+        // Smooth movement/momentum variables
+        this.momentum = { x: 0, y: 0 };
+        this.dampening = 0.95; // How quickly momentum reduces (0.95 = 5% reduction per frame)
+        this.sensitivity = 0.2; // Mouse sensitivity
+        
         this.init();
     }
     
@@ -86,13 +91,16 @@ class VirtualTourEditor {
         // Renderer setup
         this.renderer = new THREE.WebGLRenderer({
             canvas: canvas,
-            antialias: true
+            antialias: false, // Disable antialiasing for better performance
+            powerPreference: "high-performance"
         });
         this.renderer.setSize(container.clientWidth, container.clientHeight);
-        this.renderer.setPixelRatio(window.devicePixelRatio);
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Limit pixel ratio for performance
         
-        // Create panorama sphere
-        const sphereGeometry = new THREE.SphereGeometry(500, 60, 40);
+        // Create panorama sphere with lower geometry for better performance
+        // Reduced from 60,40 to 32,16 for better performance
+        // For very low-end devices, could be reduced further to 16,8
+        const sphereGeometry = new THREE.SphereGeometry(500, 32, 16);
         sphereGeometry.scale(-1, 1, 1); // Invert to view from inside
         
         const sphereMaterial = new THREE.MeshBasicMaterial();
@@ -184,6 +192,10 @@ class VirtualTourEditor {
         this.mouseX = event.clientX;
         this.mouseY = event.clientY;
         
+        // Clear momentum when starting a new drag
+        this.momentum.x = 0;
+        this.momentum.y = 0;
+        
         if (this.isHotspotMode) {
             this.createHotspotAt(event.clientX, event.clientY);
         }
@@ -195,10 +207,18 @@ class VirtualTourEditor {
         const deltaX = event.clientX - this.mouseX;
         const deltaY = event.clientY - this.mouseY;
         
-        this.lon -= deltaX * 0.1;
-        this.lat += deltaY * 0.1;
+        // Apply sensitivity and invert Y-axis (dragging up moves view down)
+        const moveX = deltaX * this.sensitivity;
+        const moveY = -deltaY * this.sensitivity; // Inverted Y-axis
+        
+        this.lon -= moveX;
+        this.lat += moveY;
         
         this.lat = Math.max(-85, Math.min(85, this.lat));
+        
+        // Store momentum for smooth movement when mouse is released
+        this.momentum.x = moveX * 0.5; // Reduce momentum strength
+        this.momentum.y = moveY * 0.5;
         
         this.mouseX = event.clientX;
         this.mouseY = event.clientY;
@@ -222,6 +242,10 @@ class VirtualTourEditor {
             this.isMouseDown = true;
             this.mouseX = event.touches[0].clientX;
             this.mouseY = event.touches[0].clientY;
+            
+            // Clear momentum when starting a new touch
+            this.momentum.x = 0;
+            this.momentum.y = 0;
         }
     }
     
@@ -231,10 +255,18 @@ class VirtualTourEditor {
             const deltaX = event.touches[0].clientX - this.mouseX;
             const deltaY = event.touches[0].clientY - this.mouseY;
             
-            this.lon -= deltaX * 0.1;
-            this.lat += deltaY * 0.1;
+            // Apply sensitivity and invert Y-axis (dragging up moves view down)
+            const moveX = deltaX * this.sensitivity;
+            const moveY = -deltaY * this.sensitivity; // Inverted Y-axis
+            
+            this.lon -= moveX;
+            this.lat += moveY;
             
             this.lat = Math.max(-85, Math.min(85, this.lat));
+            
+            // Store momentum for smooth movement when touch is released
+            this.momentum.x = moveX * 0.5; // Reduce momentum strength
+            this.momentum.y = moveY * 0.5;
             
             this.mouseX = event.touches[0].clientX;
             this.mouseY = event.touches[0].clientY;
@@ -267,30 +299,57 @@ class VirtualTourEditor {
     
     animate() {
         requestAnimationFrame(() => this.animate());
+        
+        // Apply momentum when not actively dragging
+        if (!this.isMouseDown && (Math.abs(this.momentum.x) > 0.005 || Math.abs(this.momentum.y) > 0.005)) {
+            this.lon -= this.momentum.x;
+            this.lat += this.momentum.y;
+            
+            this.lat = Math.max(-85, Math.min(85, this.lat));
+            
+            // Dampen momentum
+            this.momentum.x *= this.dampening;
+            this.momentum.y *= this.dampening;
+            
+            // Stop momentum completely when very small to avoid micro-movements
+            if (Math.abs(this.momentum.x) < 0.005) this.momentum.x = 0;
+            if (Math.abs(this.momentum.y) < 0.005) this.momentum.y = 0;
+            
+            this.updateCamera();
+        }
+        
         this.renderer.render(this.scene, this.camera);
     }
     
     async loadAvailableAssets() {
-        // Load list of available 360-degree images from the insta360 folder
+        // Load list of available 360-degree images from the server
         try {
-            const response = await fetch('/assets/insta360/');
+            const response = await fetch('/api/assets');
             if (response.ok) {
-                // For now, we'll use a hardcoded list based on what we saw in the directory
-                this.availableAssets = [
-                    'IMG_20250805_122627_00_merged.jpg',
-                    'IMG_20250805_122714_00_merged.jpg',
-                    'IMG_20250805_122846_00_merged.jpg',
-                    'IMG_20250805_123344_00_merged.jpg',
-                    'IMG_20250805_123411_00_merged.jpg',
-                    'IMG_20250805_123442_00_merged.jpg',
-                    'IMG_20250805_123522_00_merged.jpg',
-                    'IMG_20250805_123553_00_merged.jpg',
-                    'IMG_20250805_124055_00_merged.jpg',
-                    'IMG_20250805_124319_00_merged.jpg'
-                ];
+                const result = await response.json();
+                if (result.success && result.assets) {
+                    this.availableAssets = result.assets;
+                    console.log('Loaded', this.availableAssets.length, 'assets from server');
+                } else {
+                    console.warn('Server returned no assets, using hardcoded fallback');
+                    this.availableAssets = [
+                        'IMG_20250805_122627_00_merged.jpg',
+                        'IMG_20250805_122714_00_merged.jpg',
+                        'IMG_20250805_122846_00_merged.jpg',
+                        'IMG_20250805_123344_00_merged.jpg',
+                        'IMG_20250805_123411_00_merged.jpg',
+                        'IMG_20250805_123442_00_merged.jpg',
+                        'IMG_20250805_123522_00_merged.jpg',
+                        'IMG_20250805_123553_00_merged.jpg',
+                        'IMG_20250805_124055_00_merged.jpg',
+                        'IMG_20250805_124319_00_merged.jpg'
+                    ];
+                }
+            } else {
+                throw new Error('Failed to fetch assets');
             }
         } catch (error) {
-            console.warn('Could not load asset list, using hardcoded list');
+            console.warn('Could not load asset list from server, using hardcoded list', error);
             this.availableAssets = [
                 'IMG_20250805_122627_00_merged.jpg',
                 'IMG_20250805_122714_00_merged.jpg',
@@ -518,43 +577,92 @@ class VirtualTourEditor {
     
     updateSceneList() {
         console.log('Updating scene list with', this.scenes.length, 'scenes');
-        const sceneList = document.getElementById('scene-list');
-        if (!sceneList) {
-            console.error('Scene list element not found!');
+        const sceneGallery = document.getElementById('scene-gallery');
+        if (!sceneGallery) {
+            console.error('Scene gallery element not found!');
             return;
         }
         
-        sceneList.innerHTML = '';
+        sceneGallery.innerHTML = '';
         
         this.scenes.forEach((scene, index) => {
             console.log(`Adding scene ${index + 1}:`, scene);
+            console.log('Scene file_path:', scene.file_path);
             const sceneItem = document.createElement('div');
             sceneItem.className = 'scene-item';
             if (scene.id === this.currentSceneId) {
                 sceneItem.classList.add('active');
             }
             
+            // Create a placeholder image if no file_path or if it fails to load
+            const imageSrc = scene.file_path || '/static/placeholder.jpg';
+            const imageHTML = `
+                <img class="scene-thumbnail" 
+                     src="${imageSrc}" 
+                     alt="${scene.name}" 
+                     onerror="console.error('Failed to load thumbnail:', this.src); this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZjBmMGYwIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzk5OSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPk5vIEltYWdlPC90ZXh0Pjwvc3ZnPg==';"
+                     onload="console.log('Thumbnail loaded:', this.src);" />
+            `;
+            
             sceneItem.innerHTML = `
-                <img class="scene-thumbnail" src="${scene.file_path}" alt="${scene.name}" />
-                <div class="scene-details">
-                    <div class="scene-name">${scene.name}</div>
-                    <div class="scene-info">Scene ${index + 1}</div>
-                </div>
+                ${imageHTML}
+                <div class="scene-status">EDITING</div>
                 <div class="scene-controls">
-                    <button class="scene-control-btn" onclick="editor.editScene('${scene.id}')" title="Edit">✏️</button>
-                    <button class="scene-control-btn" onclick="editor.deleteScene('${scene.id}')" title="Delete">🗑️</button>
+                    <div class="scene-control-icon" onclick="editor.setInitialView()" title="Set Initial View">⇅</div>
+                    <div class="scene-control-icon north" onclick="editor.setNorthDirection()" title="Set North Direction">N</div>
+                </div>
+                <div class="scene-info">
+                    <div class="scene-name">${scene.name}</div>
+                </div>
+                <div class="scene-actions">
+                    <button class="scene-options-btn" onclick="editor.toggleSceneOptions('${scene.id}', event)" title="Options">⋮</button>
+                    <div class="scene-options-dropdown" id="options-${scene.id}">
+                        <button class="scene-option-item" onclick="editor.hideFromRibbon('${scene.id}')">
+                            <span>👁️</span> Hide from Ribbon
+                        </button>
+                        <button class="scene-option-item" onclick="editor.addDepthmap('${scene.id}')">
+                            <span>🗺️</span> Add Depthmap
+                        </button>
+                        <button class="scene-option-item" onclick="editor.swapScene('${scene.id}')">
+                            <span>🔄</span> Swap Scene
+                        </button>
+                        <button class="scene-option-item danger" onclick="editor.deleteScene('${scene.id}')">
+                            <span>🗑️</span> Delete Scene
+                        </button>
+                    </div>
                 </div>
             `;
             
             sceneItem.addEventListener('click', (e) => {
-                if (!e.target.closest('.scene-controls')) {
+                if (!e.target.closest('.scene-actions') && 
+                    !e.target.closest('.scene-controls') && 
+                    !e.target.closest('.scene-options-btn') &&
+                    !e.target.closest('.scene-options-dropdown')) {
                     this.loadScene(scene);
                 }
             });
-            sceneList.appendChild(sceneItem);
+            sceneGallery.appendChild(sceneItem);
         });
         
-        console.log('Scene list updated. DOM elements added:', sceneList.children.length);
+        console.log('Scene gallery updated. DOM elements added:', sceneGallery.children.length);
+    }
+    
+    addSceneToList(scene) {
+        console.log('Adding scene to list:', scene);
+        
+        // Add the scene to our scenes array
+        this.scenes.push(scene);
+        
+        // Update the scene list UI
+        this.updateSceneList();
+        
+        // If this is the first scene, load it automatically
+        if (this.scenes.length === 1) {
+            this.loadScene(scene);
+        }
+        
+        // Update available assets list to refresh the scene selector in modals
+        this.loadAvailableAssets();
     }
     
     async loadScene(scene) {
@@ -568,9 +676,26 @@ class VirtualTourEditor {
         if (scene.file_path) {
             const loader = new THREE.TextureLoader();
             try {
+                console.log('Loading texture from:', scene.file_path);
                 const texture = await new Promise((resolve, reject) => {
-                    loader.load(scene.file_path, resolve, undefined, reject);
+                    loader.load(
+                        scene.file_path, 
+                        resolve, 
+                        undefined, 
+                        (error) => {
+                            console.error('Texture loading error:', error);
+                            reject(error);
+                        }
+                    );
                 });
+                
+                console.log('Texture loaded successfully');
+                
+                // Optimize texture for better performance
+                texture.generateMipmaps = true;
+                texture.minFilter = THREE.LinearMipmapLinearFilter;
+                texture.magFilter = THREE.LinearFilter;
+                texture.format = THREE.RGBFormat; // Use RGB instead of RGBA for better performance
                 
                 this.currentTexture = texture;
                 this.panoramaSphere.material.map = texture;
@@ -588,7 +713,41 @@ class VirtualTourEditor {
                 
             } catch (error) {
                 console.error('Failed to load scene texture:', error);
-                alert('Failed to load scene image');
+                console.log('Retrying texture load in 1 second...');
+                
+                // Retry loading the texture after a delay
+                setTimeout(async () => {
+                    try {
+                        const texture = await new Promise((resolve, reject) => {
+                            loader.load(scene.file_path, resolve, undefined, reject);
+                        });
+                        
+                        console.log('Texture loaded successfully on retry');
+                        
+                        // Optimize texture for better performance
+                        texture.generateMipmaps = true;
+                        texture.minFilter = THREE.LinearMipmapLinearFilter;
+                        texture.magFilter = THREE.LinearFilter;
+                        texture.format = THREE.RGBFormat; // Use RGB instead of RGBA for better performance
+                        
+                        this.currentTexture = texture;
+                        this.panoramaSphere.material.map = texture;
+                        this.panoramaSphere.material.needsUpdate = true;
+                        
+                        // Update connections
+                        this.updateConnectionMarkers(scene.connections || []);
+                        
+                    } catch (retryError) {
+                        console.error('Failed to load scene texture on retry:', retryError);
+                        // Show a less intrusive notification instead of an alert
+                        console.warn('Scene image could not be loaded. The image may not exist or is corrupted.');
+                        
+                        // Only show alert if the scene list is empty (first load)
+                        if (this.scenes.length <= 1) {
+                            alert('Failed to load scene image. Please check that the image file exists.');
+                        }
+                    }
+                }, 1000);
             }
         }
     }
@@ -880,6 +1039,97 @@ class VirtualTourEditor {
         alert('North direction saved');
     }
     
+    editScene(sceneId) {
+        // Find the scene and start editing it
+        const scene = this.scenes.find(s => s.id === sceneId);
+        if (scene) {
+            const newName = prompt('Enter new scene name:', scene.name);
+            if (newName && newName !== scene.name) {
+                scene.name = newName;
+                this.updateSceneList();
+                // You can add server update logic here if needed
+            }
+        }
+    }
+    
+    toggleSceneOptions(sceneId, event) {
+        event.stopPropagation();
+        
+        // Close all other dropdowns first
+        document.querySelectorAll('.scene-options-dropdown').forEach(dropdown => {
+            if (dropdown.id !== `options-${sceneId}`) {
+                dropdown.classList.remove('show');
+            }
+        });
+        
+        // Toggle the clicked dropdown
+        const dropdown = document.getElementById(`options-${sceneId}`);
+        if (dropdown) {
+            dropdown.classList.toggle('show');
+        }
+    }
+    
+    hideFromRibbon(sceneId) {
+        const scene = this.scenes.find(s => s.id === sceneId);
+        if (scene) {
+            alert(`"${scene.name}" hidden from ribbon`);
+            this.closeAllDropdowns();
+            // Add server update logic here if needed
+        }
+    }
+    
+    addDepthmap(sceneId) {
+        const scene = this.scenes.find(s => s.id === sceneId);
+        if (scene) {
+            alert(`Adding depthmap to "${scene.name}"`);
+            this.closeAllDropdowns();
+            // Add server update logic here if needed
+        }
+    }
+    
+    swapScene(sceneId) {
+        const scene = this.scenes.find(s => s.id === sceneId);
+        if (scene) {
+            alert(`Swapping scene "${scene.name}"`);
+            this.closeAllDropdowns();
+            // Add server update logic here if needed
+        }
+    }
+    
+    closeAllDropdowns() {
+        document.querySelectorAll('.scene-options-dropdown').forEach(dropdown => {
+            dropdown.classList.remove('show');
+        });
+    }
+    
+    setSceneAsInitial(sceneId) {
+        const scene = this.scenes.find(s => s.id === sceneId);
+        if (scene) {
+            alert(`"${scene.name}" set as initial scene`);
+            // Add server update logic here if needed
+        }
+    }
+    
+    deleteScene(sceneId) {
+        this.closeAllDropdowns();
+        if (confirm('Are you sure you want to delete this scene?')) {
+            if (window.app && window.app.socket) {
+                window.app.socket.send(JSON.stringify({
+                    action: "EditTour",
+                    data: {
+                        tour_id: this.currentTourId,
+                        editor_action: {
+                            action: "DeleteScene",
+                            data: {
+                                scene_id: sceneId
+                            }
+                        }
+                    }
+                }));
+            }
+        }
+    }
+    
     deleteCurrentScene() {
         if (!this.currentSceneId) return;
         
@@ -1020,6 +1270,15 @@ function confirmAddConnection() {
     }
 }
 
+// Close dropdowns when clicking outside
+document.addEventListener('click', (event) => {
+    if (!event.target.closest('.scene-options-btn') && !event.target.closest('.scene-options-dropdown')) {
+        document.querySelectorAll('.scene-options-dropdown').forEach(dropdown => {
+            dropdown.classList.remove('show');
+        });
+    }
+});
+
 // Close modals when clicking outside
 window.addEventListener('click', (event) => {
     const modals = document.querySelectorAll('.modal');
@@ -1029,3 +1288,12 @@ window.addEventListener('click', (event) => {
         }
     });
 });
+
+// Return to homepage function
+function returnToHomepage() {
+    // Clear the current tour ID from localStorage
+    localStorage.removeItem('currentTourId');
+    
+    // Navigate to homepage
+    window.location.href = '/static/homepage.html';
+}

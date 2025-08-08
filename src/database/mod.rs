@@ -14,6 +14,7 @@ use bcrypt::{hash, verify, DEFAULT_COST};
 use crate::tour::Tour;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use tokio::fs;
 
 
 #[derive(Debug, Clone)]
@@ -274,6 +275,8 @@ impl Database {
     }
 
     /// Deletes a tour if it belongs to the specified user.
+    /// This cascades to delete all associated scenes and connections.
+    /// Also deletes associated files from the filesystem.
     /// 
     /// # Arguments
     /// * `username` - The owner's username.
@@ -283,6 +286,50 @@ impl Database {
     /// * `Ok(bool)` - True if the tour was deleted, false if it didn't exist or didn't belong to the user.
     /// * `Err(sqlx::Error)` - If the deletion fails.
     pub async fn delete_tour(&self, username: &str, tour_id: i64) -> Result<bool, sqlx::Error> {
+        // First check if the tour exists and belongs to the user
+        let tour_exists = sqlx::query("SELECT 1 FROM tours WHERE id = ?1 AND owner = ?2")
+            .bind(tour_id)
+            .bind(username)
+            .fetch_optional(&*self.pool)
+            .await?;
+
+        if tour_exists.is_none() {
+            return Ok(false);
+        }
+
+        // Get all file paths for assets belonging to this tour before deleting
+        let file_paths: Vec<String> = sqlx::query("SELECT file_path FROM assets WHERE tour_id = ?1 AND file_path IS NOT NULL")
+            .bind(tour_id)
+            .fetch_all(&*self.pool)
+            .await?
+            .iter()
+            .filter_map(|row| row.get::<Option<String>, _>("file_path"))
+            .collect();
+
+        // Delete files from filesystem
+        for file_path in file_paths {
+            // Remove leading slash if present (file paths in DB may have /assets/... format)
+            let clean_path = file_path.strip_prefix("/").unwrap_or(&file_path);
+            
+            match fs::remove_file(clean_path).await {
+                Ok(_) => println!("Deleted file: {}", clean_path),
+                Err(e) => eprintln!("Failed to delete file {}: {}", clean_path, e),
+            }
+        }
+
+        // Delete all connections for this tour
+        sqlx::query("DELETE FROM connections WHERE tour_id = ?1")
+            .bind(tour_id)
+            .execute(&*self.pool)
+            .await?;
+
+        // Delete all assets (scenes and closeups) for this tour
+        sqlx::query("DELETE FROM assets WHERE tour_id = ?1")
+            .bind(tour_id)
+            .execute(&*self.pool)
+            .await?;
+
+        // Finally delete the tour itself
         let result = sqlx::query("DELETE FROM tours WHERE id = ?1 AND owner = ?2")
             .bind(tour_id)
             .bind(username)
@@ -475,8 +522,24 @@ impl Database {
         Ok(())
     }
 
-    /// Deletes a scene from the database
+    /// Deletes a scene from the database and filesystem
     pub async fn delete_scene(&self, scene_db_id: i64) -> Result<(), sqlx::Error> {
+        // Get the file path before deleting the scene
+        let file_path: Option<String> = sqlx::query("SELECT file_path FROM assets WHERE id = ?1")
+            .bind(scene_db_id)
+            .fetch_optional(&*self.pool)
+            .await?
+            .and_then(|row| row.get::<Option<String>, _>("file_path"));
+
+        // Delete file from filesystem if it exists
+        if let Some(path) = file_path {
+            let clean_path = path.strip_prefix("/").unwrap_or(&path);
+            match fs::remove_file(clean_path).await {
+                Ok(_) => println!("Deleted scene file: {}", clean_path),
+                Err(e) => eprintln!("Failed to delete scene file {}: {}", clean_path, e),
+            }
+        }
+
         // First delete all connections involving this scene
         sqlx::query("DELETE FROM connections WHERE start_id = ?1 OR end_id = ?1")
             .bind(scene_db_id)

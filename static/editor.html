@@ -15,46 +15,30 @@
             <div class="panel-header">
                 <div class="panel-title" id="tour-title">Virtual Tour Editor</div>
                 <div class="panel-subtitle" id="tour-subtitle">Loading tour...</div>
+                <button class="home-btn" onclick="returnToHomepage()" title="Return to Homepage">
+                    🏠 Homepage
+                </button>
             </div>
 
             <div class="panel-content">
-                <!-- Scene Management Section -->
-                <div class="section">
-                    <div class="section-header">
-                        <div class="section-title">
-                            📷 Add Scenes
-                        </div>
-                        <button class="add-scene-btn" onclick="showAddSceneModal()">
-                            ➕ Add Scenes
-                        </button>
-                    </div>
-                    <div class="scene-list" id="scene-list">
-                        <!-- Scene items will be populated here -->
-                    </div>
-                </div>
-
-                <!-- Tools Section -->
-                <div class="section">
-                    <div class="section-header">
-                        <div class="section-title">
-                            🔧 Fast Rename
-                        </div>
-                        <button class="add-scene-btn" onclick="fastRename()">
+                <!-- Toolbar Section -->
+                <div class="toolbar-section">
+                    <button class="toolbar-btn primary" onclick="showAddSceneModal()">
+                        ➕ Add Scenes
+                    </button>
+                    <div class="toolbar-row">
+                        <button class="toolbar-btn secondary" onclick="fastRename()">
                             ✏️ Fast Rename
                         </button>
-                    </div>
-                </div>
-
-                <!-- Sort Section -->
-                <div class="section">
-                    <div class="section-header">
-                        <div class="section-title">
-                            � Sort Scenes
-                        </div>
-                        <button class="add-scene-btn" onclick="sortScenes()">
+                        <button class="toolbar-btn secondary" onclick="sortScenes()">
                             💲 Sort Scenes
                         </button>
                     </div>
+                </div>
+
+                <!-- Scene Gallery -->
+                <div class="scene-gallery" id="scene-gallery">
+                    <!-- Scene items will be populated here -->
                 </div>
             </div>
         </div>

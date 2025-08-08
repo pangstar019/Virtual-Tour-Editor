@@ -130,6 +130,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/tours/:id", delete(delete_tour_handler))
         // Upload route
         .route("/upload-asset", post(editor::upload_asset_handler))
+        // Assets list route  
+        .route("/api/assets", get(list_assets_handler))
         // Static HTML pages
         .route("/", get(index_page))
         .route("/login", get(login_page))
@@ -602,6 +604,52 @@ async fn delete_tour_handler(
         }))),
         Ok(false) => Err(StatusCode::NOT_FOUND),
         Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR)
+    }
+}
+
+// Assets list handler
+async fn list_assets_handler() -> impl IntoResponse {
+    use std::fs;
+    
+    let assets_dir = "assets/insta360";
+    
+    match fs::read_dir(assets_dir) {
+        Ok(entries) => {
+            let mut files = Vec::new();
+            
+            for entry in entries {
+                if let Ok(entry) = entry {
+                    let path = entry.path();
+                    if path.is_file() {
+                        if let Some(file_name) = path.file_name() {
+                            if let Some(file_name_str) = file_name.to_str() {
+                                // Only include image files
+                                if file_name_str.ends_with(".jpg") || 
+                                   file_name_str.ends_with(".jpeg") || 
+                                   file_name_str.ends_with(".png") {
+                                    files.push(file_name_str.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Sort files for consistent ordering
+            files.sort();
+            
+            Json(serde_json::json!({
+                "success": true,
+                "assets": files
+            })).into_response()
+        }
+        Err(_) => {
+            Json(serde_json::json!({
+                "success": false,
+                "message": "Could not read assets directory",
+                "assets": []
+            })).into_response()
+        }
     }
 }
 
