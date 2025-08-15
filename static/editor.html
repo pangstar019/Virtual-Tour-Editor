@@ -27,11 +27,8 @@
                         ➕ Add Scenes
                     </button>
                     <div class="toolbar-row">
-                        <button class="toolbar-btn secondary" onclick="fastRename()">
-                            ✏️ Fast Rename
-                        </button>
                         <button class="toolbar-btn secondary" onclick="sortScenes()">
-                            💲 Sort Scenes
+                            ⇵ Sort Scenes
                         </button>
                     </div>
                 </div>
@@ -54,17 +51,22 @@
                     <div class="tour-info" id="tour-info">Preparing virtual tour editor</div>
                 </div>
                 <div class="toolbar-right">
-                    <button class="btn small" onclick="resetView()">🎯</button>
-                    <button class="btn small" onclick="toggleFullscreen()">⛶</button>
+                    <button class="btn icon-btn" onclick="resetView()" title="Reset View">
+                        <img src="/static/assets/reset_icon.png" alt="Reset" class="icon-img" />
+                        <span class="btn-text">Reset View</span>
+                    </button>
+                    <button class="btn icon-btn" onclick="toggleFullscreen()" title="Toggle Fullscreen">
+                        <img src="/static/assets/fullscreen_icon.png" alt="Fullscreen" class="icon-img" />
+                        <span class="btn-text">Toggle Fullscreen</span>
+                    </button>
                 </div>
             </div>
 
             <!-- Bottom Toolbar -->
             <div class="bottom-toolbar">
-                <button class="toolbar-btn" onclick="addInfospot()">📍 Add Infospot</button>
-                <button class="toolbar-btn" id="link-hotspot-btn" onclick="toggleHotspotMode()">🔗 Link Hotspot</button>
-                <button class="toolbar-btn" onclick="setInitialView()">👁️ Set Initial View</button>
-                <button class="toolbar-btn" onclick="previewTour()">▶️ Preview</button>
+                <button class="toolbar-btn" onclick="addInfospot()">Add Infospot</button>
+                <button class="toolbar-btn" id="link-hotspot-btn" onclick="toggleHotspotMode()">Link Hotspot</button>
+                <button class="toolbar-btn" onclick="setInitialView()">Set Initial View</button>
             </div>
 
             <!-- Hotspot Creation Mode Indicator -->
@@ -75,44 +77,37 @@
             <!-- Loading Indicator -->
             <div class="loading" id="loading-indicator">
                 <div class="spinner"></div>
-                <div>Loading virtual tour...</div>
+                <div class="loading-message">Loading virtual tour...</div>
             </div>
         </div>
+    </div>
+
+    <!-- Notification Container -->
+    <div id="notification-container" class="notification-container">
+        <!-- Notifications will be dynamically added here -->
     </div>
 
     <!-- Add Scene Modal -->
     <div id="add-scene-modal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <div class="modal-title">Add New Scene</div>
+                <div class="modal-title">Add New Scene(s)</div>
             </div>
             <div class="modal-body">
-                <div class="form-group">
-                    <label class="form-label" for="scene-name">Scene Name:</label>
-                    <input type="text" id="scene-name" class="form-input" placeholder="Enter scene name" />
-                </div>
-                
                 <!-- File Upload Area -->
                 <div class="form-group">
-                    <label class="form-label">Upload New 360° Image:</label>
+                    <label class="form-label">Upload 360° Image(s):</label>
                     <div class="upload-area" onclick="document.getElementById('file-upload').click()">
                         <div class="upload-icon">📁</div>
                         <div class="upload-text">Click to upload or drag & drop</div>
                         <div class="upload-hint">Supports JPG, PNG files (Equirectangular format)</div>
                     </div>
-                    <input type="file" id="file-upload" class="file-input" accept="image/*" />
-                </div>
-
-                <div class="form-group">
-                    <label class="form-label">Or select from existing 360° images:</label>
-                    <div class="asset-grid" id="asset-grid">
-                        <!-- Asset items will be populated here -->
-                    </div>
+                    <input type="file" id="file-upload" class="file-input" accept="image/*" multiple />
                 </div>
             </div>
             <div class="modal-actions">
                 <button class="btn" onclick="closeAddSceneModal()">Cancel</button>
-                <button class="btn success" onclick="confirmAddScene()">Add Scene</button>
+                <button class="btn success" onclick="confirmAddScene()">Add Scene(s)</button>
             </div>
         </div>
     </div>
@@ -130,10 +125,46 @@
                         <option value="">Select target scene...</option>
                     </select>
                 </div>
+                <div class="form-group">
+                    <label class="form-label" for="connection-name">Display Name (optional):</label>
+                    <input id="connection-name" class="form-input" placeholder="e.g. To Lobby" />
+                    <div class="form-hint">Shown on hover over the connection.</div>
+                </div>
             </div>
             <div class="modal-actions">
                 <button class="btn" onclick="closeAddConnectionModal()">Cancel</button>
                 <button class="btn success" onclick="confirmAddConnection()">Create Connection</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Connection Modal -->
+    <div id="edit-connection-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">Edit Connection</div>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label" for="edit-target-scene">Target Scene:</label>
+                    <select id="edit-target-scene" class="form-input">
+                        <option value="">Select target scene...</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="edit-connection-name">Display Name (optional):</label>
+                    <input id="edit-connection-name" class="form-input" placeholder="e.g. Lobby → Hatches" />
+                    <div class="form-hint">Shown on hover over the connection.</div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Coordinates:</label>
+                    <div id="edit-connection-coords" class="form-hint">Lon: -, Lat: -</div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn" onclick="closeEditConnectionModal()">Cancel</button>
+                <button class="btn danger" onclick="deleteActiveConnection()">Delete</button>
+                <button class="btn success" onclick="confirmEditConnection()">Save</button>
             </div>
         </div>
     </div>

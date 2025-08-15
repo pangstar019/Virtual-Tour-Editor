@@ -32,30 +32,33 @@ CREATE TABLE IF NOT EXISTS tours (
 );
 
 CREATE TABLE IF NOT EXISTS assets (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    modified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     name TEXT NOT NULL,
     tour_id INTEGER NOT NULL,
     file_path TEXT,
     description TEXT,
     is_scene BOOLEAN NOT NULL DEFAULT 0,
     is_floorplan BOOLEAN NOT NULL DEFAULT 0,
-    initial_view_x INTEGER NOT NULL DEFAULT 0,
-    initial_view_y INTEGER NOT NULL DEFAULT 0,
-    north_dir INTEGER DEFAULT 0,
+    initial_view_x FLOAT NOT NULL DEFAULT 0,
+    initial_view_y FLOAT NOT NULL DEFAULT 0,
+    north_dir FLOAT DEFAULT 0,
+    pov FLOAT DEFAULT 75,
     FOREIGN KEY (tour_id) REFERENCES tours(id)
 );
 
 CREATE TABLE IF NOT EXISTS connections (
-    id INTEGER PRIMARY KEY,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     tour_id INTEGER NOT NULL,
     start_id INTEGER NOT NULL,
     end_id INTEGER,
     floorplan_id INTEGER,
     is_floorplan BOOLEAN NOT NULL DEFAULT 0,
-    screen_loc_x INTEGER NOT NULL DEFAULT 0,
-    screen_loc_y INTEGER NOT NULL DEFAULT 0,
+    name TEXT,
+    world_lon FLOAT NOT NULL,
+    world_lat FLOAT NOT NULL,
     is_transition BOOLEAN NOT NULL DEFAULT 0,
     FOREIGN KEY (tour_id) REFERENCES tours(id),
     FOREIGN KEY (start_id) REFERENCES assets(id),

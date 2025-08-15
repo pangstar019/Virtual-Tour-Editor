@@ -166,6 +166,54 @@ button:hover {
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
 }
 
+/* New tour item styles for thumbnails */
+.tour-item {
+  background: white;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  transition: all 0.3s ease;
+  border: 1px solid rgba(102, 126, 234, 0.1);
+  cursor: pointer;
+}
+
+.tour-item:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+}
+
+.tour-thumbnail {
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  display: block;
+}
+
+.tour-info {
+  padding: 20px;
+}
+
+.tour-name {
+  font-size: 18px;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 12px;
+}
+
+.tour-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+  color: #666;
+}
+
+.tour-views, .tour-date {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
 .tour-title {
   font-size: 18px;
   font-weight: 600;

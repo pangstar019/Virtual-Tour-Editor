@@ -169,20 +169,36 @@ class HomepageManager {
   }
   
   /**
-   * Display tours in the grid
+   * Display tours on the homepage
    */
   displayTours(tours) {
-    if (tours.length === 0) {
-      this.showEmptyState();
-      return;
-    }
-    
-    let tourHTML = tours.map(tour => this.createTourCard(tour)).join('');
-    
-    // Add create new tour card
-    tourHTML += this.createNewTourCard();
-    
-    this.tourListDiv.innerHTML = tourHTML;
+    this.tourListDiv.innerHTML = '';
+
+    tours.forEach(tour => {
+      const tourDiv = document.createElement('div');
+      tourDiv.className = 'tour-item';
+
+      tourDiv.innerHTML = `
+        <img class="tour-thumbnail" src="${tour.initial_scene_thumbnail || 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzAwIiBoZWlnaHQ9IjIwMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWxsPSIjZGRkIi8+PHRleHQgeD0iNTAlIiB5PSI1MCUiIGZvbnQtZmFtaWx5PSJBcmlhbCIgZm9udC1zaXplPSIxOCIgZmlsbD0iIzk5OSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZHk9Ii4zZW0iPk5vIFRodW1ibmFpbDwvdGV4dD48L3N2Zz4='}" alt="${tour.name}" 
+             onerror="this.style.display='none'">
+        <div class="tour-info">
+          <div class="tour-name">${tour.name}</div>
+          <div class="tour-meta">
+            <span class="tour-views">👁️ ${tour.views || 0}</span>
+            <span class="tour-date">📅 ${new Date(tour.created_at).toLocaleDateString()}</span>
+          </div>
+        </div>
+      `;
+
+      // Add click handler to navigate to editor
+      tourDiv.addEventListener('click', () => {
+        // Store tour ID and navigate to editor
+        localStorage.setItem('currentTourId', tour.id);
+        navigate('editor');
+      });
+
+      this.tourListDiv.appendChild(tourDiv);
+    });
   }
   
   /**

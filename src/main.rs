@@ -23,14 +23,16 @@ use axum::{
     Json,
     routing::{get, post, delete},
     Router,
-    http::StatusCode,
+    http::{StatusCode, HeaderValue},
 };
 use tower::ServiceBuilder;
 use tower_http::{
     cors::CorsLayer,
     services::ServeDir,
+    set_header::SetResponseHeaderLayer,
 };
 use std::sync::Arc;
+use std::collections::HashMap;
 use sqlx::SqlitePool;
 use tokio::sync::{mpsc, RwLock, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -45,6 +47,9 @@ static ACTIVE_CONNECTIONS: AtomicUsize = AtomicUsize::new(0);
 
 // Lazy database instance
 static DATABASE: RwLock<Option<Arc<Database>>> = RwLock::const_new(None);
+
+// Global editor sessions store - key format: "username_tourid"
+static EDITOR_SESSIONS: RwLock<Option<HashMap<String, editor::EditorState>>> = RwLock::const_new(None);
 
 #[derive(Clone)]
 pub struct AppState {
@@ -82,8 +87,8 @@ enum ClientMessage {
     Help,
     ShowTours,
     CreateTour { name: String, location: String },
-    EditTour { tour_id: String, editor_action: Option<editor::EditorAction> },
-    DeleteTour { tour_id: String },
+    EditTour { tour_id: i32, editor_action: Option<editor::EditorAction> },
+    DeleteTour { tour_id: i32 },
 }
 
 #[tokio::main]
@@ -137,9 +142,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/login", get(login_page))
         .route("/homepage", get(homepage))
         .route("/editor", get(editor_page))
-        // Static file serving
-        .nest_service("/static", ServeDir::new("static"))
-        .nest_service("/assets", ServeDir::new("assets"))
+        // Static file serving with caching headers for better performance
+        .nest_service("/static", 
+            ServiceBuilder::new()
+                .layer(SetResponseHeaderLayer::overriding(
+                    axum::http::header::CACHE_CONTROL, 
+                    HeaderValue::from_static("public, max-age=86400") // Cache for 24 hours
+                ))
+                .service(ServeDir::new("static"))
+        )
+        .nest_service("/assets", 
+            ServiceBuilder::new()
+                .layer(SetResponseHeaderLayer::overriding(
+                    axum::http::header::CACHE_CONTROL, 
+                    HeaderValue::from_static("public, max-age=3600") // Cache assets for 1 hour
+                ))
+                .service(ServeDir::new("assets"))
+        )
         .layer(
             ServiceBuilder::new()
                 .layer(DefaultBodyLimit::max(120 * 1024 * 1024)) // 100MB limit
@@ -185,6 +204,8 @@ async fn initialize_db() -> SqlitePool {
         .execute(&pool)
         .await
         .expect("Failed to execute schema");
+
+    // No legacy migration needed: fresh DBs only; world_lon/world_lat are part of schema
     
     println!("Database initialized successfully");
     pool
@@ -208,6 +229,67 @@ async fn get_database() -> Arc<Database> {
     drop(db_write);
     
     database
+}
+
+// Get or create an editor session for a user+tour combination
+async fn get_or_create_editor_session(
+    username: &str,
+    tour_id: i64,
+    db: &Arc<Database>
+) -> Result<editor::EditorState, Box<dyn std::error::Error + Send + Sync>> {
+    let session_key = format!("{}_{}", username, tour_id);
+    
+    // First, try to get existing session
+    {
+        let sessions_read = EDITOR_SESSIONS.read().await;
+        if let Some(ref sessions) = *sessions_read {
+            if let Some(editor_state) = sessions.get(&session_key) {
+                println!("Reusing existing editor session for {}", session_key);
+                return Ok(editor_state.clone());
+            }
+        }
+    }
+    
+    // Create new session if it doesn't exist
+    println!("Creating new editor session for {}", session_key);
+    let mut editor_state = editor::EditorState::new(tour_id, username.to_string(), Some((**db).clone()));
+    editor_state.load_from_database(db).await?;
+    
+    // Store in global sessions
+    let mut sessions_write = EDITOR_SESSIONS.write().await;
+    if sessions_write.is_none() {
+        *sessions_write = Some(HashMap::new());
+    }
+    if let Some(ref mut sessions) = *sessions_write {
+        sessions.insert(session_key, editor_state.clone());
+    }
+    
+    Ok(editor_state)
+}
+
+// Update an existing editor session
+async fn update_editor_session(
+    username: &str,
+    tour_id: i64,
+    editor_state: editor::EditorState
+) {
+    let session_key = format!("{}_{}", username, tour_id);
+    
+    let mut sessions_write = EDITOR_SESSIONS.write().await;
+    if sessions_write.is_none() {
+        *sessions_write = Some(HashMap::new());
+    }
+    if let Some(ref mut sessions) = *sessions_write {
+        sessions.insert(session_key, editor_state);
+    }
+}
+
+// Clean up editor sessions for a user (called on logout/disconnect)
+async fn cleanup_user_editor_sessions(username: &str) {
+    let mut sessions_write = EDITOR_SESSIONS.write().await;
+    if let Some(ref mut sessions) = *sessions_write {
+        sessions.retain(|key, _| !key.starts_with(&format!("{}_", username)));
+    }
 }
 
 // WebSocket handler
@@ -268,6 +350,12 @@ async fn handle_websocket(socket: WebSocket, state: AppState) {
 
     let _ = state.database.cleanup_old_sessions().await;
     println!("Cleaned up session on connection close");
+
+    // Clean up editor sessions for the disconnected user
+    if !curr_user.name.is_empty() {
+        cleanup_user_editor_sessions(&curr_user.name).await;
+        println!("Cleaned up editor sessions for user: {}", curr_user.name);
+    }
 
     // Decrement connection counter and cleanup if needed
     let remaining_connections = ACTIVE_CONNECTIONS.fetch_sub(1, Ordering::Relaxed) - 1;
@@ -378,7 +466,9 @@ async fn handle_client(user: User, db: Arc<Database>) -> bool {
     while let Some(result) = user.rx.lock().await.next().await {
         if let Ok(msg) = result {
             if let Message::Text(text) = msg {
+                println!("Received message: {}", text);
                 let client_msg: Result<ClientMessage, serde_json::Error> = serde_json::from_str(&text);
+                println!("Parsed message: {:?}", client_msg);
                 match client_msg {
                     Ok(ClientMessage::ShowTours) => {
                         let tours_json = get_tours_json(db.clone(), user.name.clone()).await;
@@ -401,28 +491,27 @@ async fn handle_client(user: User, db: Arc<Database>) -> bool {
                         }
                     }
                     Ok(ClientMessage::DeleteTour { tour_id }) => {
-                        if let Ok(tour_id_num) = tour_id.parse::<i64>() {
-                            match db.delete_tour(&user.name, tour_id_num).await {
-                                Ok(true) => {
-                                    let _ = tx.send(Message::Text(r#"{"message": "Tour deleted successfully!"}"#.to_string()));
-                                    // Send updated tours list
-                                    let tours_json = get_tours_json(db.clone(), user.name.clone()).await;
-                                    let _ = tx.send(Message::Text(tours_json));
-                                }
-                                Ok(false) => {
-                                    let _ = tx.send(Message::Text(r#"{"message": "Tour not found or access denied."}"#.to_string()));
-                                }
-                                Err(e) => {
-                                    eprintln!("Failed to delete tour: {}", e);
-                                    let _ = tx.send(Message::Text(r#"{"message": "Failed to delete tour. Server error."}"#.to_string()));
-                                }
+                        let tour_id_i64 = tour_id as i64;
+                        match db.delete_tour(&user.name, tour_id_i64).await {
+                            Ok(true) => {
+                                let _ = tx.send(Message::Text(r#"{"message": "Tour deleted successfully!"}"#.to_string()));
+                                // Send updated tours list
+                                let tours_json = get_tours_json(db.clone(), user.name.clone()).await;
+                                let _ = tx.send(Message::Text(tours_json));
                             }
-                        } else {
-                            let _ = tx.send(Message::Text(r#"{"message": "Invalid tour ID."}"#.to_string()));
+                            Ok(false) => {
+                                let _ = tx.send(Message::Text(r#"{"message": "Tour not found or access denied."}"#.to_string()));
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to delete tour: {}", e);
+                                let _ = tx.send(Message::Text(r#"{"message": "Failed to delete tour. Server error."}"#.to_string()));
+                            }
                         }
                     }
                     Ok(ClientMessage::Logout) => {
                         let _ = db.logout_user(&user.name).await;
+                        // Clean up editor sessions for the logging out user
+                        cleanup_user_editor_sessions(&user.name).await;
                         let _ = tx.send(Message::Text(r#"{"message": "Logged out successfully.", "redirect": "login"}"#.to_string()));
                         return false; // Go back to login phase
                     }
@@ -436,61 +525,70 @@ async fn handle_client(user: User, db: Arc<Database>) -> bool {
                         }
                     }
                     Ok(ClientMessage::EditTour { tour_id, editor_action }) => {
-                        if let Ok(tour_id_num) = tour_id.parse::<i64>() {
-                            // Check if this is the initial tour load or an editor action
-                            match editor_action {
-                                None => {
-                                    // Initial tour load - return tour data and start editor session
-                                    match db.get_tour_with_scenes(&user.name, tour_id_num).await {
-                                        Ok(Some(tour_data)) => {
-                                            let response = serde_json::json!({
-                                                "type": "tour_data",
-                                                "data": tour_data
-                                            });
-                                            let _ = tx.send(Message::Text(response.to_string()));
-                                            
-                                            // Initialize editor state
-                                            let mut editor_state = editor::EditorState::new(tour_id.clone(), tour_id_num, user.name.clone(), Some((*db).clone()));
-                                            let _ = editor_state.load_from_database(&db).await;
-                                            
-                                            // Start editor session
-                                            let response = serde_json::json!({
-                                                "type": "editor_ready",
-                                                "state": editor_state.to_json()
-                                            });
-                                            let _ = tx.send(Message::Text(response.to_string()));
-                                        }
-                                        Ok(None) => {
-                                            let _ = tx.send(Message::Text(r#"{"type": "error", "message": "Tour not found or access denied."}"#.to_string()));
-                                        }
-                                        Err(e) => {
-                                            eprintln!("Failed to get tour data: {}", e);
-                                            let _ = tx.send(Message::Text(r#"{"type": "error", "message": "Failed to load tour data."}"#.to_string()));
+                        let tour_id_i64 = tour_id as i64;
+                        // Check if this is the initial tour load or an editor action
+                        match editor_action {
+                            None => {
+                                // Initial tour load - return tour data and start editor session
+                                match db.get_tour_with_scenes(&user.name, tour_id_i64).await {
+                                    Ok(Some(tour_data)) => {
+                                        let response = serde_json::json!({
+                                            "type": "tour_data",
+                                            "data": tour_data
+                                        });
+                                        let _ = tx.send(Message::Text(response.to_string()));
+                                        
+                                        // Initialize or get editor session
+                                        match get_or_create_editor_session(&user.name, tour_id_i64, &db).await {
+                                            Ok(editor_state) => {
+                                                // Start editor session
+                                                let response = serde_json::json!({
+                                                    "type": "editor_ready",
+                                                    "state": editor_state.to_json()
+                                                });
+                                                let _ = tx.send(Message::Text(response.to_string()));
+                                            }
+                                            Err(e) => {
+                                                eprintln!("Failed to initialize editor session: {}", e);
+                                                let _ = tx.send(Message::Text(r#"{"type": "error", "message": "Failed to initialize editor session."}"#.to_string()));
+                                            }
                                         }
                                     }
-                                }
-                                Some(action) => {
-                                    // Handle editor action
-                                    let mut editor_state = editor::EditorState::new(tour_id.clone(), tour_id_num, user.name.clone(), Some((*db).clone()));
-                                    let _ = editor_state.load_from_database(&db).await;
-                                    
-                                    match editor_state.handle_action(action, &tx).await {
-                                        Ok(_) => {
-                                            // Save changes to database
-                                            let _ = editor_state.save_to_database(&db).await;
-                                        }
-                                        Err(e) => {
-                                            eprintln!("Editor action failed: {}", e);
-                                            let _ = tx.send(Message::Text(r#"{"type": "error", "message": "Editor action failed."}"#.to_string()));
-                                        }
+                                    Ok(None) => {
+                                        let _ = tx.send(Message::Text(r#"{"type": "error", "message": "Tour not found or access denied."}"#.to_string()));
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Failed to get tour data: {}", e);
+                                        let _ = tx.send(Message::Text(r#"{"type": "error", "message": "Failed to load tour data."}"#.to_string()));
                                     }
                                 }
                             }
-                        } else {
-                            let _ = tx.send(Message::Text(r#"{"type": "error", "message": "Invalid tour ID."}"#.to_string()));
+                            Some(action) => {
+                                // Handle editor action using session-based state
+                                match get_or_create_editor_session(&user.name, tour_id_i64, &db).await {
+                                    Ok(mut editor_state) => {
+                                        match editor_state.handle_action(action, &tx).await {
+                                            Ok(_) => {
+                                                // Save changes to database and update session
+                                                let _ = editor_state.save_to_database(&db).await;
+                                                update_editor_session(&user.name, tour_id_i64, editor_state).await;
+                                            }
+                                            Err(e) => {
+                                                eprintln!("Editor action failed: {}", e);
+                                                let _ = tx.send(Message::Text(r#"{"type": "error", "message": "Editor action failed."}"#.to_string()));
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Failed to get/create editor session: {}", e);
+                                        let _ = tx.send(Message::Text(r#"{"type": "error", "message": "Failed to initialize editor session."}"#.to_string()));
+                                    }
+                                }
+                            }
                         }
                     }
                     _ => {
+                        println!("reached end");
                         let _ = tx.send(Message::Text(r#"{"message": "Feature not implemented yet."}"#.to_string()));
                     }
                 }
@@ -515,13 +613,25 @@ async fn get_tours_json(db: Arc<Database>, username: String) -> String {
     }
 
     for tour in tours.unwrap() {
+        // Get the initial scene thumbnail - convert i32 to Option<i64>
+        let initial_scene_id_opt = if tour.initial_scene_id > 0 {
+            Some(tour.initial_scene_id as i64)
+        } else {
+            None
+        };
+        
+        let initial_scene_thumbnail = db.get_initial_scene_thumbnail(tour.get_id() as i64, initial_scene_id_opt).await
+            .unwrap_or(None);
+
         tour_list.push(serde_json::json!({
             "id": tour.get_id(),
             "name": tour.name,
             "created_at": tour.created_at,
             "modified_at": tour.modified_at,
             "initial_scene_id": tour.initial_scene_id,
-            "location": tour.location
+            "initial_scene_thumbnail": initial_scene_thumbnail,
+            "location": tour.location,
+            "views": 0  // You can implement view tracking later
         }));
     }
 
@@ -590,14 +700,12 @@ async fn create_tour_handler(
 
 async fn delete_tour_handler(
     State(state): State<AppState>,
-    Path(tour_id): Path<String>,
+    Path(tour_id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     // TODO: Extract username from session/auth header
     let username = "test_user"; // Placeholder
     
-    let tour_id_num: i64 = tour_id.parse().map_err(|_| StatusCode::BAD_REQUEST)?;
-    
-    match state.database.delete_tour(username, tour_id_num).await {
+    match state.database.delete_tour(username, tour_id).await {
         Ok(true) => Ok(Json(serde_json::json!({
             "success": true,
             "message": "Tour deleted successfully"

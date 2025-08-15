@@ -1,6 +1,22 @@
 /**
- * Virtual Tour Editor - Editor Styles
+ * Virtual Tour Editor - Styles
+ * 
+ * Table of Contents:
+ * 1. Base Styles & Reset
+ * 2. Layout Structure
+ * 3. Side Panel
+ * 4. Toolbar & Controls
+ * 5. Scene Gallery
+ * 6. Scene Management
+ * 7. Main Viewer
+ * 8. Hotspots & Connections
+ * 9. Modals & Forms
+ * 10. Responsive Design
  */
+
+/* ====================================
+   1. BASE STYLES & RESET
+   ==================================== */
 
 * {
     margin: 0;
@@ -16,7 +32,12 @@ html {
     overflow: hidden;
     background: #f5f5f5;
     color: #333;
+    line-height: 1.5;
 }
+
+/* ====================================
+   2. LAYOUT STRUCTURE
+   ==================================== */
 
 .editor-container {
     position: relative;
@@ -26,7 +47,10 @@ html {
     background: #f5f5f5;
 }
 
-/* Side Panel */
+/* ====================================
+   3. SIDE PANEL
+   ==================================== */
+
 .side-panel {
     width: 320px;
     background: #ffffff;
@@ -48,7 +72,6 @@ html {
     font-size: 18px;
     font-weight: 600;
     margin-bottom: 5px;
-    color: #333;
 }
 
 .panel-subtitle {
@@ -80,6 +103,7 @@ html {
 .panel-content {
     flex: 1;
     overflow-y: auto;
+    overflow-x: visible; /* Allow horizontal overflow for dropdowns */
     padding: 0;
 }
 
@@ -149,6 +173,7 @@ html {
 .scene-gallery {
     flex: 1;
     overflow-y: auto;
+    overflow-x: visible; /* Allow horizontal overflow for dropdowns */
     padding: 15px;
     display: flex;
     flex-direction: column;
@@ -162,7 +187,7 @@ html {
     cursor: pointer;
     transition: all 0.2s ease;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    overflow: hidden;
+    overflow: hidden; /* Change back to hidden to contain thumbnail */
     position: relative;
     width: 100%;
     height: 120px;
@@ -206,6 +231,33 @@ html {
     margin: 0;
     word-wrap: break-word;
     text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.scene-name-input {
+    font-size: 14px;
+    font-weight: 600;
+    color: white;
+    background: transparent;
+    border: 1px solid transparent;
+    margin: 0;
+    padding: 2px 4px;
+    width: 100%;
+    word-wrap: break-word;
+    text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+    border-radius: 3px;
+    outline: none;
+}
+
+.scene-name-input:hover {
+    border-color: rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.scene-name-input:focus {
+    border-color: #2196F3;
+    background: rgba(255, 255, 255, 0.9);
+    color: #333;
+    text-shadow: none;
 }
 
 .scene-status {
@@ -269,6 +321,8 @@ html {
     display: flex;
     align-items: center;
     gap: 8px;
+    z-index: 999;
+    /* Remove relative positioning that was constraining the dropdown */
 }
 
 .scene-options-btn {
@@ -294,61 +348,84 @@ html {
 /* Scene Options Dropdown */
 .scene-options-dropdown {
     position: absolute;
-    bottom: 30px;
+    bottom: 100%; /* Position above the button instead of below */
     right: 0;
     background: white;
+    border: 1px solid #ddd;
     border-radius: 8px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     min-width: 160px;
     z-index: 1000;
-    opacity: 0;
-    visibility: hidden;
-    transform: translateY(10px);
-    transition: all 0.2s ease;
+    display: none;
+    margin-bottom: 5px; /* Add some spacing from the button */
 }
 
 .scene-options-dropdown.show {
-    opacity: 1;
-    visibility: visible;
-    transform: translateY(0);
+    display: block;
 }
 
-.scene-option-item {
-    padding: 12px 16px;
+/* Fix scene item container and thumbnail sizing */
+.scene-item {
+    background: white;
+    border-radius: 8px;
+    padding: 0;
     cursor: pointer;
-    font-size: 13px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    transition: background-color 0.2s;
-    border: none;
-    background: none;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    overflow: hidden; /* Change back to hidden to contain thumbnail */
+    position: relative;
     width: 100%;
-    text-align: left;
+    height: 120px;
+    max-height: 120px;
 }
 
-.scene-option-item:hover {
-    background: #f8f9fa;
-}
-
-.scene-option-item.danger {
-    color: #dc3545;
-}
-
-.scene-option-item.danger:hover {
-    background: #f8d7da;
-}
-
-.scene-option-item:first-child {
+.scene-thumbnail {
+    width: 100%;
+    height: 120px;
+    object-fit: cover;
+    object-position: center;
+    display: block;
     border-radius: 8px 8px 0 0;
 }
 
-.scene-option-item:last-child {
-    border-radius: 0 0 8px 8px;
+/* Fix actions positioning to allow dropdown to extend */
+.scene-actions {
+    position: absolute;
+    bottom: 12px;
+    right: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    z-index: 999;
+    /* Remove relative positioning that was constraining the dropdown */
 }
 
-.scene-action-btn:hover {
-    color: #ff6b6b;
+/* Ensure parent containers allow dropdown overflow */
+.scene-gallery {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: visible; /* Allow horizontal overflow for dropdowns */
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.panel-content {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: visible; /* Allow horizontal overflow for dropdowns */
+    padding: 0;
+}
+
+/* Alternative positioning if dropdown goes off-screen */
+@media (max-height: 600px) {
+    .scene-options-dropdown {
+        bottom: auto;
+        top: 100%;
+        margin-bottom: 0;
+        margin-top: 5px;
+    }
 }
 
 /* Old scene item styles removed - replaced with scene gallery above */
@@ -428,6 +505,81 @@ html {
     box-shadow: none;
 }
 
+/* Icon buttons with hover text */
+.icon-btn {
+    position: relative;
+    padding: 6px 10px;
+    min-width: 36px;
+    background: #6c757d;
+    border-radius: 6px;
+    transition: all 0.3s ease;
+}
+
+.icon-btn:hover {
+    background: #495057;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+}
+
+.icon-btn .icon {
+    font-size: 16px;
+    display: block;
+    transition: all 0.3s ease;
+}
+
+.icon-btn .icon-img {
+    width: 14px;
+    height: 14px;
+    display: block;
+    transition: all 0.3s ease;
+    filter: brightness(0) invert(1);
+    opacity: 0.8;
+}
+
+.icon-btn .btn-text {
+    position: absolute;
+    bottom: -35px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+    z-index: 1000;
+    pointer-events: none;
+}
+
+.icon-btn .btn-text::before {
+    content: '';
+    position: absolute;
+    top: -4px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-bottom: 4px solid rgba(0, 0, 0, 0.8);
+}
+
+.icon-btn:hover .btn-text {
+    opacity: 1;
+    visibility: visible;
+    bottom: -40px;
+}
+
+.icon-btn:hover .icon {
+    transform: scale(1.1);
+}
+
+.icon-btn:hover .icon-img {
+    transform: scale(1.15);
+    opacity: 1;
+}
+
 /* Main Viewer */
 .main-viewer {
     flex: 1;
@@ -441,6 +593,16 @@ html {
     width: 100%;
     height: 100%;
     display: block;
+}
+
+/* Improve pointer feedback over the canvas */
+#viewer-canvas { cursor: grab; }
+#viewer-canvas:active { cursor: grabbing; }
+
+/* Modal hint text */
+.form-hint {
+    color: #666;
+    font-size: 0.9rem;
 }
 
 /* Top Toolbar */
@@ -488,22 +650,18 @@ html {
 .bottom-toolbar {
     position: absolute;
     bottom: 20px;
-    left: 50%;
-    transform: translateX(-50%);
-    background: rgba(0, 0, 0, 0.8);
-    backdrop-filter: blur(10px);
+    right: 3%;
     border-radius: 8px;
     padding: 12px 20px;
     display: flex;
     align-items: center;
     gap: 15px;
     z-index: 50;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
 }
 
 .toolbar-btn {
-    background: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(0, 0, 0, 0.363);
+    border: 1px solid rgba(255, 255, 255, 0.055);
     color: white;
     padding: 8px 12px;
     border-radius: 6px;
@@ -524,6 +682,14 @@ html {
 .toolbar-btn.active {
     background: #2196F3;
     border-color: #2196F3;
+}
+
+.toolbar-btn.disabled {
+    background: rgba(128, 128, 128, 0.3);
+    border-color: rgba(128, 128, 128, 0.2);
+    color: rgba(255, 255, 255, 0.5);
+    cursor: not-allowed;
+    pointer-events: none;
 }
 
 /* Navigation Hotspots */
@@ -572,33 +738,37 @@ html {
     }
 }
 
-/* Connection Markers (Legacy) */
+/* Connection Markers */
 .connection-marker {
     position: absolute;
-    width: 32px;
-    height: 32px;
-    background: rgba(33, 150, 243, 0.9);
-    border: 2px solid white;
-    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    background: transparent url('/static/assets/transition_icon.png?v=2') no-repeat center center;
+    background-size: contain;
+    border: none;
+    border-radius: 0;
     cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 14px;
-    color: white;
     transition: all 0.3s ease;
     z-index: 10;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    filter: drop-shadow(0 2px 10px rgba(0, 0, 0, 0.3));
+    opacity: 0.9;
+    /* Ensure no other properties interfere */
+    color: transparent;
+    text-indent: -9999px;
+    overflow: hidden;
 }
 
 .connection-marker:hover {
     transform: scale(1.2);
-    background: rgba(33, 150, 243, 1);
-    box-shadow: 0 4px 15px rgba(33, 150, 243, 0.4);
+    opacity: 1;
+    filter: drop-shadow(0 4px 15px rgba(33, 150, 243, 0.4));
 }
 
-.connection-marker::before {
-    content: '→';
+/* Remove any pseudo-elements from connection markers */
+.connection-marker::before,
+.connection-marker::after {
+    content: none;
+    display: none;
 }
 
 /* Hotspot Creation Mode */
@@ -697,63 +867,6 @@ html {
     border-top: 1px solid #e0e0e0;
 }
 
-/* Asset Grid */
-.asset-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 12px;
-    max-height: 300px;
-    overflow-y: auto;
-    padding: 4px;
-}
-
-.asset-item {
-    cursor: pointer;
-    border-radius: 6px;
-    overflow: hidden;
-    border: 2px solid transparent;
-    transition: all 0.2s;
-    background: white;
-    aspect-ratio: 16/9;
-    height: fit-content;
-}
-
-.asset-item:hover {
-    border-color: #2196F3;
-    transform: translateY(-2px);
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-}
-
-.asset-item.selected {
-    border-color: #2196F3;
-    box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.2);
-}
-
-.asset-image {
-    width: 100%;
-    height: 100px;
-    object-fit: cover;
-    background: #f5f5f5;
-    aspect-ratio: 16/9;
-}
-
-.asset-name {
-    padding: 8px;
-    font-size: 11px;
-    color: #666;
-    text-align: center;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.no-assets {
-    text-align: center;
-    color: #666;
-    padding: 40px 20px;
-    font-style: italic;
-}
-
 /* File Upload Area */
 .upload-area {
     border: 2px dashed #ddd;
@@ -792,49 +905,39 @@ html {
     display: none;
 }
 
-/* Asset Grid */
-.asset-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    gap: 8px;
-    max-height: 200px;
-    overflow-y: auto;
+/* Upload Progress */
+.upload-progress-container {
+    margin-top: 20px;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid #e0e0e0;
 }
 
-.asset-item {
-    position: relative;
-    aspect-ratio: 16/9;
+.upload-progress {
+    width: 100%;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 8px;
+    background: #e0e0e0;
     border-radius: 4px;
     overflow: hidden;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    height: fit-content;
+    margin-bottom: 10px;
 }
 
-.asset-item:hover {
-    transform: scale(1.05);
-}
-
-.asset-item.selected {
-    outline: 2px solid #3498db;
-}
-
-.asset-image {
-    width: 100%;
+.progress-fill {
     height: 100%;
-    object-fit: cover;
-    aspect-ratio: 16/9;
+    background: #2196F3;
+    border-radius: 4px;
+    transition: width 0.3s ease;
+    width: 0%;
 }
 
-.asset-name {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    background: rgba(0, 0, 0, 0.7);
-    color: white;
-    font-size: 10px;
-    padding: 4px;
+.progress-text {
+    font-size: 14px;
+    color: #666;
     text-align: center;
 }
 
@@ -865,21 +968,58 @@ html {
     transform: translate(-50%, -50%);
     text-align: center;
     z-index: 100;
+    background: rgba(245, 245, 245, 0.95);
+    padding: 2rem;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+    min-width: 200px;
+}
+
+.loading-message {
+    color: #555;
+    font-weight: 500;
+    margin-top: 1rem;
+    font-size: 14px;
 }
 
 .spinner {
     width: 40px;
     height: 40px;
-    border: 3px solid rgba(255, 255, 255, 0.3);
+    border: 3px solid rgba(52, 152, 219, 0.3);
     border-top: 3px solid #3498db;
     border-radius: 50%;
     animation: spin 1s linear infinite;
-    margin: 0 auto 10px;
+    margin: 0 auto;
 }
 
 @keyframes spin {
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
+}
+
+/* No Scenes Message */
+.no-scenes-message {
+    text-align: center;
+    color: #666;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+}
+
+.no-scenes-message .icon {
+    font-size: 3rem;
+    opacity: 0.5;
+}
+
+.no-scenes-message .title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: #333;
+}
+
+.no-scenes-message .subtitle {
+    font-size: 1rem;
+    opacity: 0.7;
 }
 
 /* Responsive */
@@ -893,10 +1033,6 @@ html {
         gap: 10px;
     }
     
-    .asset-grid {
-        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
-    }
-    
     .scene-item {
         height: 100px;
         max-height: 100px;
@@ -905,4 +1041,101 @@ html {
     .scene-thumbnail {
         height: 100px;
     }
+}
+
+/* ====================================
+   11. NOTIFICATION SYSTEM
+   ==================================== */
+
+.notification-container {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 400px;
+    pointer-events: none;
+}
+
+.notification {
+    background: #28a745;
+    color: white;
+    padding: 12px 16px;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transform: translateX(100%);
+    transition: transform 0.3s ease, opacity 0.3s ease;
+    pointer-events: auto;
+    font-size: 14px;
+    line-height: 1.4;
+    border-left: 4px solid #1e7e34;
+}
+
+.notification.show {
+    transform: translateX(0);
+}
+
+.notification.success {
+    background: #28a745;
+    border-left-color: #1e7e34;
+}
+
+.notification.error {
+    background: #dc3545;
+    border-left-color: #bd2130;
+}
+
+.notification.warning {
+    background: #ffc107;
+    color: #212529;
+    border-left-color: #d39e00;
+}
+
+.notification.info {
+    background: #17a2b8;
+    border-left-color: #117a8b;
+}
+
+.notification-icon {
+    font-size: 16px;
+    flex-shrink: 0;
+}
+
+.notification-content {
+    flex: 1;
+}
+
+.notification-title {
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.notification-message {
+    opacity: 0.9;
+}
+
+.notification-close {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    padding: 0;
+    font-size: 18px;
+    opacity: 0.7;
+    transition: opacity 0.2s ease;
+    flex-shrink: 0;
+}
+
+.notification-close:hover {
+    opacity: 1;
+}
+
+.notification.fade-out {
+    opacity: 0;
+    transform: translateX(100%);
 }

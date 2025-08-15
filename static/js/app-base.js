@@ -312,7 +312,7 @@ class VirtualTourApp {
       if (this.socket && this.socket.readyState === WebSocket.OPEN && this.isLoggedIn) {
         this.sendMessage({ action: "Heartbeat" });
       }
-    }, 30000); // 30 seconds
+    }, 45000); // 45 seconds
   }
   
   /**

@@ -2,7 +2,6 @@ use super::*;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use axum::extract::ws::{Message, WebSocket};
-use futures::StreamExt;
 
 
 // Define User struct
