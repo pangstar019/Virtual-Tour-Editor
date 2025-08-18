@@ -3164,6 +3164,51 @@ function sortScenes() {
     alert('Sort scenes feature not yet implemented');
 }
 
+async function exportCurrentTour() {
+    const btn = document.getElementById('export-btn');
+    const overlay = document.getElementById('export-overlay');
+    const overlayText = document.getElementById('export-overlay-text');
+    const resetUI = () => {
+        if (btn) { btn.disabled = false; btn.classList.remove('is-loading'); btn.innerText = 'Export'; }
+        if (overlay) overlay.style.display = 'none';
+    };
+    try {
+        const tourId = localStorage.getItem('currentTourId') || (editor && editor.currentTourId);
+        if (!tourId) { if (editor?.showError) editor.showError('No tour loaded'); else alert('No tour loaded'); return; }
+
+        if (btn) { btn.disabled = true; btn.classList.add('is-loading'); btn.innerText = 'Exporting…'; }
+        if (overlay) { overlayText && (overlayText.textContent = 'Preparing export...'); overlay.style.display = 'flex'; }
+
+        const res = await fetch(`/api/export/${tourId}`);
+        if (!res.ok) {
+            const text = await res.text().catch(() => 'Export failed');
+            resetUI();
+            if (res.status === 404) {
+                if (editor?.showError) editor.showError('Tour not found'); else alert('Tour not found');
+            } else {
+                if (editor?.showError) editor.showError(text || 'Export failed'); else alert(text || 'Export failed');
+            }
+            return;
+        }
+        overlayText && (overlayText.textContent = 'Downloading...');
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `tour_${tourId}_export.zip`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+        resetUI();
+        if (editor && editor.showSuccess) editor.showSuccess('Export package downloaded');
+    } catch (e) {
+        console.error('Export error', e);
+        resetUI();
+        if (editor?.showError) editor.showError('Export error. See console for details.'); else alert('Export error');
+    }
+}
+
 // Scene management functions
 function toggleSceneOptions(sceneId, event) {
     if (editor) editor.toggleSceneOptions(sceneId, event);
@@ -3235,4 +3280,67 @@ function setBottomToolbarButtonStates(activeButtonType) {
 function returnToHomepage() {
     localStorage.removeItem('currentTourId');
     window.location.href = '/static/homepage.html';
+}
+
+// --- Concurrent export helpers (open in new tab with background fallback) ---
+function getCurrentTourId() {
+    // Prefer localStorage value, then editor state
+    const fromStorage = localStorage.getItem('currentTourId');
+    if (fromStorage) return fromStorage;
+    if (window.editor && editor.currentTourId) return editor.currentTourId;
+    return null;
+}
+
+function openExportInNewTab(event) {
+    try {
+        const tourId = getCurrentTourId();
+        if (!tourId) {
+            if (editor?.showError) editor.showError('Could not determine the tour to export.');
+            else alert('Could not determine the tour to export.');
+            return;
+        }
+
+        const url = `/api/export/${encodeURIComponent(tourId)}`;
+        // Open synchronously to avoid popup blockers as much as possible
+        const win = window.open('about:blank', '_blank', 'noopener');
+        if (win) {
+            try { win.document.write('<title>Preparing export…</title><p style="font-family:sans-serif">Preparing your export…</p>'); } catch (_) {}
+            win.location = url; // triggers download in new tab
+            if (editor?.showSuccess) editor.showSuccess('Export started in a new tab.');
+        } else {
+            // Popup blocked → background download fallback
+            backgroundExportDownload(url, tourId);
+        }
+    } catch (err) {
+        console.error('openExportInNewTab error', err);
+        if (editor?.showError) editor.showError('Failed to start export.'); else alert('Failed to start export.');
+    }
+}
+
+async function backgroundExportDownload(url, tourId) {
+    const btn = document.getElementById('export-btn');
+    const original = btn ? btn.innerText : null;
+    try {
+        if (btn) { btn.disabled = true; btn.innerText = 'Exporting…'; }
+        const res = await fetch(url, { credentials: 'include' });
+        if (!res.ok) {
+            const text = await res.text().catch(() => 'Export failed');
+            throw new Error(text || `Export failed (${res.status})`);
+        }
+        const blob = await res.blob();
+        const dlUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = dlUrl;
+        a.download = `tour_${tourId}_export.zip`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(dlUrl);
+        if (editor?.showSuccess) editor.showSuccess('Export package downloaded');
+    } catch (e) {
+        console.error('backgroundExportDownload error', e);
+        if (editor?.showError) editor.showError('Export failed. See console for details.'); else alert('Export failed.');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerText = original || 'Export'; }
+    }
 }

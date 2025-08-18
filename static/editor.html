@@ -59,6 +59,10 @@
                         <img src="/static/assets/fullscreen_icon.png" alt="Fullscreen" class="icon-img" />
                         <span class="btn-text">Toggle Fullscreen</span>
                     </button>
+                    <button id="export-btn" class="btn icon-btn" onclick="openExportInNewTab(event)">
+                        <img src="/static/assets/export_icon.png" alt="Export" class="icon-img" onerror="this.style.display='none'" />
+                        <span class="btn-text">Export</span>
+                    </button>
                 </div>
             </div>
 
@@ -85,6 +89,17 @@
     <!-- Notification Container -->
     <div id="notification-container" class="notification-container">
         <!-- Notifications will be dynamically added here -->
+    </div>
+
+    <!-- Export Loading Overlay -->
+    <div id="export-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:99999; align-items:center; justify-content:center;">
+        <div style="background:#111; color:#fff; padding:16px 20px; border-radius:8px; font-family: Arial, sans-serif; box-shadow:0 8px 20px rgba(0,0,0,0.35); min-width:260px; text-align:center;">
+            <div class="spinner" style="margin:0 auto 10px; width:28px; height:28px; border:3px solid #444; border-top-color:#18a0fb; border-radius:50%; animation:spin 0.9s linear infinite;"></div>
+            <div id="export-overlay-text">Preparing export...</div>
+        </div>
+        <style>
+            @keyframes spin { to { transform: rotate(360deg); } }
+        </style>
     </div>
 
     <!-- Add Scene Modal -->

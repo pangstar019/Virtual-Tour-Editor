@@ -38,6 +38,7 @@ use tokio::sync::{mpsc, RwLock, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use serde::Deserialize;
 use futures::{StreamExt, SinkExt};
+use std::io::Write;
 
 use database::Database;
 use user::User;
@@ -135,6 +136,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/tours/:id", delete(delete_tour_handler))
         // Upload route
         .route("/upload-asset", post(editor::upload_asset_handler))
+    // Export route
+    .route("/api/export/:tour_id", get(export_tour_handler))
         // Assets list route  
         .route("/api/assets", get(list_assets_handler))
         // Static HTML pages
@@ -773,4 +776,147 @@ async fn homepage() -> Html<&'static str> {
 
 async fn editor_page() -> Html<&'static str> {
     Html(include_str!("../static/editor.html"))
+}
+
+// --- Export handler ---
+// Generates a downloadable ZIP containing a self-hostable tour package.
+async fn export_tour_handler(
+    State(state): State<AppState>,
+    Path(tour_id): Path<i64>,
+) -> impl IntoResponse {
+    println!("export: start packaging for tour {}", tour_id);
+    // TODO: auth/ownership check via session; for now, fetch by tour_id only
+    let db = state.database.clone();
+
+    // Load tour data by id (no owner filter)
+    let tour = match db.get_tour_with_scenes_by_id(tour_id).await {
+        Ok(Some(t)) => t,
+        Ok(None) => return (StatusCode::NOT_FOUND, "Tour not found").into_response(),
+        Err(e) => {
+            eprintln!("export: failed to load tour {}: {}", tour_id, e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to load tour").into_response();
+        }
+    };
+
+    // Build a zip in memory
+    let cursor = std::io::Cursor::new(Vec::new());
+    let mut zip = zip::ZipWriter::new(cursor);
+    let options = zip::write::FileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .unix_permissions(0o644);
+
+    // Helper to add a file from bytes
+    let mut add_file = |path_in_zip: &str, bytes: &[u8]| -> Result<(), Box<dyn std::error::Error>> {
+        zip.start_file(path_in_zip, options)?;
+        zip.write_all(bytes)?;
+        Ok(())
+    };
+
+    // 1) Add viewer: Always include minimal viewer index
+    let viewer_html = include_str!("../static/export-viewer/index.html");
+    if let Err(e) = add_file("index.html", viewer_html.as_bytes()) {
+        eprintln!("export: add viewer index failed: {}", e);
+    }
+
+    // 2) Ensure three/engine exist; prefer bundling our built-in engine
+    let mut engine_added = false;
+    let mut three_added = false;
+    // Bundle our minimal engine implementation
+    let builtin_engine = std::path::Path::new("static/export-viewer/js/engine.min.js");
+    if builtin_engine.exists() {
+        if let Ok(bytes) = std::fs::read(builtin_engine) { let _ = add_file("js/engine.min.js", &bytes); engine_added = true; }
+    }
+    // Also try to source engine from example viewer if present (secondary)
+    let candidate_engine = std::path::Path::new("203 Ambleside/js/engine.min.js");
+    if !engine_added && candidate_engine.exists() {
+        if let Ok(bytes) = std::fs::read(candidate_engine) { let _ = add_file("js/engine.min.js", &bytes); engine_added = true; }
+    }
+    let candidate_three = std::path::Path::new("203 Ambleside/js/three.min.js");
+    if candidate_three.exists() {
+        if let Ok(bytes) = std::fs::read(candidate_three) { let _ = add_file("js/three.min.js", &bytes); three_added = true; }
+    }
+
+    // 3) Build tourData.js from DB JSON and include
+    let tour_js = format!("const tourData = {};", tour);
+    if let Err(e) = add_file("js/tourData.js", tour_js.as_bytes()) {
+        eprintln!("export: add tourData.js failed: {}", e);
+    }
+
+    // 4) Copy referenced image assets into assets/ (insta360 and closeups)
+    // Collect unique file paths from scenes and connections
+    let mut paths: Vec<String> = Vec::new();
+    if let Some(scenes) = tour.get("scenes").and_then(|v| v.as_array()) {
+        for s in scenes {
+            if let Some(fp) = s.get("file_path").and_then(|v| v.as_str()) {
+                paths.push(fp.to_string());
+            }
+            if let Some(conns) = s.get("connections").and_then(|v| v.as_array()) {
+                for c in conns {
+                    if let Some(fp) = c.get("file_path").and_then(|v| v.as_str()) { paths.push(fp.to_string()); }
+                }
+            }
+        }
+    }
+    paths.sort();
+    paths.dedup();
+    for p in paths {
+        let rel = p.trim_start_matches('/');
+        if rel.is_empty() { continue; }
+        if let Ok(bytes) = std::fs::read(rel) {
+        let zip_path = format!("{}", rel); // keep same assets/... structure
+            if let Err(e) = add_file(&zip_path, &bytes) { eprintln!("export: add asset {} failed: {}", rel, e); }
+        } else {
+            eprintln!("export: missing asset file: {}", rel);
+        }
+    }
+
+    // 4b) Also copy static assets (icons/sprites) into assets/ from static/assets
+    let static_assets_root = std::path::Path::new("static/assets");
+    if static_assets_root.exists() {
+        for entry in walkdir::WalkDir::new(static_assets_root).into_iter().flatten() {
+            let p = entry.path();
+            if p.is_file() {
+                if let Ok(bytes) = std::fs::read(p) {
+                    if let Ok(rel) = p.strip_prefix("static") {
+                        let mut zip_path = rel.to_string_lossy().to_string();
+                        zip_path = zip_path.replace('\\', "/");
+                        let _ = add_file(&zip_path, &bytes);
+                    }
+                }
+            }
+        }
+    }
+
+    // 5) Fallback note for engine if missing
+    if !engine_added {
+        let note = b"// Engine not bundled; use your own viewer. tourData.js is included.";
+        let _ = add_file("js/engine.min.js", note);
+    }
+    if !three_added {
+        let note = b"// Three.js not bundled. Include a compatible build in js/three.min.js.";
+        let _ = add_file("js/three.min.js", note);
+    }
+
+    let cursor = match zip.finish() { // finish writer and retrieve cursor
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("export: zip finish error: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to package").into_response();
+        }
+    };
+
+    let buffer = cursor.into_inner();
+
+    println!("export: finished packaging for tour {} ({} bytes)", tour_id, buffer.len());
+
+    // Build response
+    let filename = format!("tour_{}_export.zip", tour_id);
+    let mut headers = axum::http::HeaderMap::new();
+    headers.insert(axum::http::header::CONTENT_TYPE, HeaderValue::from_static("application/zip"));
+    headers.insert(
+        axum::http::header::CONTENT_DISPOSITION,
+        HeaderValue::from_str(&format!("attachment; filename=\"{}\"", filename)).unwrap_or(HeaderValue::from_static("attachment"))
+    );
+
+    (headers, buffer).into_response()
 }

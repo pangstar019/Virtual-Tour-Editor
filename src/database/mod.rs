@@ -444,6 +444,79 @@ impl Database {
         }
     }
 
+    /// Gets a tour with all its scenes and connections by tour_id only (no owner filter)
+    pub async fn get_tour_with_scenes_by_id(&self, tour_id: i64) -> Result<Option<serde_json::Value>, sqlx::Error> {
+        let tour_row = sqlx::query("SELECT id, tour_name, created_at, modified_at, initial_scene_id, location, has_floorplan, floorplan_id
+                                   FROM tours WHERE id = ?1")
+            .bind(tour_id)
+            .fetch_optional(&*self.pool)
+            .await?;
+
+        if let Some(tour_row) = tour_row {
+            let scene_rows = sqlx::query("SELECT id, name, file_path, initial_view_x, initial_view_y, north_dir, pov
+                                         FROM assets WHERE tour_id = ?1 AND is_scene = 1")
+                .bind(tour_id)
+                .fetch_all(&*self.pool)
+                .await?;
+
+            let mut scenes = Vec::new();
+            for scene_row in scene_rows {
+                let scene_id: i64 = scene_row.get("id");
+                let connection_rows = sqlx::query("SELECT id, end_id, name, world_lon, world_lat, is_transition, file_path, icon_type
+                                                  FROM connections WHERE tour_id = ?1 AND start_id = ?2")
+                    .bind(tour_id)
+                    .bind(scene_id)
+                    .fetch_all(&*self.pool)
+                    .await?;
+                let mut connections = Vec::new();
+                for conn_row in connection_rows {
+                    let id: i64 = conn_row.get("id");
+                    let target: Option<i64> = conn_row.get("end_id");
+                    let world_lon: f32 = conn_row.get("world_lon");
+                    let world_lat: f32 = conn_row.get("world_lat");
+                    let name: Option<String> = conn_row.get("name");
+                    let is_transition: bool = conn_row.get("is_transition");
+                    let file_path: Option<String> = conn_row.get("file_path");
+                    let icon_type: Option<i64> = conn_row.get("icon_type");
+                    connections.push(serde_json::json!({
+                        "id": id,
+                        "target_scene_id": target,
+                        "position": [world_lon, world_lat],
+                        "name": name,
+                        "file_path": file_path,
+                        "connection_type": if is_transition { "Transition" } else { "Closeup" },
+                        "icon_index": icon_type
+                    }));
+                }
+
+                scenes.push(serde_json::json!({
+                    "id": scene_id,
+                    "name": scene_row.get::<String, _>("name"),
+                    "file_path": scene_row.get::<Option<String>, _>("file_path"),
+                    "initial_view_x": scene_row.get::<f32, _>("initial_view_x"),
+                    "initial_view_y": scene_row.get::<f32, _>("initial_view_y"),
+                    "north_dir": scene_row.get::<Option<f32>, _>("north_dir"),
+                    "initial_fov": scene_row.get::<Option<f32>, _>("pov"),
+                    "connections": connections
+                }));
+            }
+
+            let tour_data = serde_json::json!({
+                "id": tour_row.get::<i64, _>("id"),
+                "name": tour_row.get::<String, _>("tour_name"),
+                "location": tour_row.get::<Option<String>, _>("location"),
+                "created_at": tour_row.get::<String, _>("created_at"),
+                "modified_at": tour_row.get::<String, _>("modified_at"),
+                "initial_scene_id": tour_row.get::<i64, _>("initial_scene_id"),
+                "scenes": scenes
+            });
+
+            Ok(Some(tour_data))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Saves a scene to the database
     /// 
     /// # Arguments

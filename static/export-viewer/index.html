@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Virtual Tour</title>
+  <style>
+    html, body, #root { height:100%; margin:0; }
+    #notification { position:fixed; top:12px; left:50%; transform:translateX(-50%); background:#222; color:#fff; padding:8px 12px; border-radius:4px; font-family:sans-serif; display:none; }
+    canvas { display:block; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <div id="notification">Loading...</div>
+  <script src="./js/three.min.js"></script>
+  <script>
+    // Fallback to CDN if local three.js isn't bundled
+    (function(){
+      function ensureThree(callback){
+        if (window.THREE) return callback();
+        var s = document.createElement('script');
+        s.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+        s.onload = callback;
+        s.onerror = callback; // proceed even if it fails; engine may handle it
+        document.head.appendChild(s);
+      }
+      window.__ensureThree = ensureThree;
+    })();
+  </script>
+  <script src="./js/engine.min.js"></script>
+  <script src="./js/tourData.js"></script>
+  <script>
+    // Minimal bootstrap: expect engine.min.js to expose a global startTour(rootEl, tourData)
+    (function(){
+      const root = document.getElementById('root');
+      function boot(){
+        if (typeof startTour === 'function') {
+          startTour(root, (typeof tourData !== 'undefined' ? tourData : null));
+        } else {
+          const n = document.getElementById('notification');
+          n.textContent = 'Viewer engine missing. Add js/engine.min.js that implements startTour(root, tourData).';
+          n.style.display = 'block';
+        }
+      }
+      if (window.__ensureThree) window.__ensureThree(boot); else boot();
+    })();
+  </script>
+</body>
+</html>
