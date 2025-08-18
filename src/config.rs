@@ -57,7 +57,7 @@ impl Default for Config {
             },
             app: AppConfig {
                 name: "Virtual Tour Editor".to_string(),
-                version: "0.2.0".to_string(),
+                version: "2.1.0".to_string(),
             },
         }
     }

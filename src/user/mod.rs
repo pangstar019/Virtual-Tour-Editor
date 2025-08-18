@@ -10,7 +10,6 @@ pub struct User {
     pub name: String,
     pub tx: mpsc::UnboundedSender<Message>,
     pub rx: Arc<Mutex<futures::stream::SplitStream<WebSocket>>>,
-    pub tours_list: Vec<Tour>,
     pub session_token: Option<String>,
 }
 

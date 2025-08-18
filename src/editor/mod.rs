@@ -54,6 +54,7 @@ pub struct Connection {
     pub target_scene_id: i32,
     pub position: Coordinates,
     pub name: Option<String>,
+    pub icon_index: Option<i32>,
 }
 
 // Actions received from the client/editor UI
@@ -65,9 +66,9 @@ pub enum EditorAction {
     DeleteScene { scene_id: i32 },
     SetInitialScene { scene_id: i32 },
     UpdateSceneName { scene_id: i32, name: String },
-    AddCloseup { name: String, file_path: String, parent_scene_id: i32, position: (f32, f32), description: String },
+    AddCloseup { name: String, file_path: String, parent_scene_id: i32, position: (f32, f32), icon_type: Option<i32> },
     AddConnection { start_scene_id: i32, asset_id: i32, position: (f32, f32), name: Option<String> },
-    EditConnection { connection_id: i32, new_asset_id: i32, new_position: (f32, f32), new_name: Option<String> },
+    EditConnection { connection_id: i32, new_asset_id: i32, new_position: (f32, f32), new_name: Option<String>, new_icon_type: Option<i32>, new_file_path: Option<String> },
     DeleteConnection { connection_id: i32 },
     SetInitialView { scene_id: i32, position: (f32, f32), fov: Option<f32> },
     SetNorthDirection { scene_id: i32, direction: f32 },
@@ -168,14 +169,14 @@ impl EditorState {
             EditorAction::UpdateSceneName { scene_id, name } => {
                 self.update_scene_name(scene_id, name, tx).await?;
             }
-            EditorAction::AddCloseup { name, file_path, parent_scene_id, position, description } => {
-                self.add_closeup(name, file_path, parent_scene_id, position, description, tx).await?;
+            EditorAction::AddCloseup { name, file_path, parent_scene_id, position, icon_type } => {
+                self.add_closeup(name, file_path, parent_scene_id, position, icon_type, tx).await?;
             }
             EditorAction::AddConnection { start_scene_id, asset_id, position, name } => {
                 self.add_connection(start_scene_id, asset_id, position, name, tx).await?;
             }
-            EditorAction::EditConnection { connection_id, new_asset_id, new_position, new_name } => {
-                self.edit_connection(connection_id, new_asset_id, new_position, new_name, tx).await?;
+            EditorAction::EditConnection { connection_id, new_asset_id, new_position, new_name, new_icon_type, new_file_path } => {
+                self.edit_connection(connection_id, new_asset_id, new_position, new_name, new_icon_type, new_file_path, tx).await?;
             }
             EditorAction::DeleteConnection { connection_id } => {
                 self.delete_connection(connection_id, tx).await?;
@@ -405,20 +406,20 @@ impl EditorState {
         file_path: String,
         parent_scene_id: i32,
         position: (f32, f32),
-        description: String,
+        icon_type: Option<i32>,
         tx: &mpsc::UnboundedSender<Message>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         
         // Save closeup to database if available
         if let Some(ref db) = self.db {
-            match db.save_closeup(self.tour_id, &name, &file_path, &description).await {
+            match db.save_closeup(self.tour_id, &name, &file_path, icon_type).await {
                 Ok(closeup_db_id) => {
                     println!("Closeup '{}' saved to database with ID: {}", name, closeup_db_id);
                     
                     // Find the parent scene and add the connection
                     if let Some(scene) = self.scenes.iter_mut().find(|s| s.id == parent_scene_id) {
                         // Save connection to the closeup using numeric scene ID
-                        match db.save_connection(self.tour_id, scene.id as i64, Some(closeup_db_id), position.0 as f32, position.1 as f32, false, None, Some(&file_path)).await {
+                        match db.save_connection(self.tour_id, scene.id as i64, Some(closeup_db_id), position.0 as f32, position.1 as f32, false, None, Some(&file_path), icon_type).await {
                             Ok(conn_db_id) => {
                                 println!("Connection to closeup saved with ID: {}", conn_db_id);
                                 
@@ -429,12 +430,19 @@ impl EditorState {
                                     target_scene_id: closeup_db_id as i32,
                                     position: Coordinates { x: position.0 as f32, y: position.1 as f32 },
                                     name: None,
+                                    icon_index: icon_type,
                                 };
                                 scene.connections.push(connection);
+                                // Update index for this new closeup so edits can find it
+                                if let Some(last) = scene.connections.last() {
+                                    if last.id != 0 {
+                                        self.connection_index.insert(last.id, (parent_scene_id, scene.connections.len() - 1));
+                                    }
+                                }
                                 
                                 let response = format!(
-                                    r#"{{"type": "closeup_added", "name": "{}", "file_path": "{}", "parent_scene": "{}", "connection_id": "{}"}}"#,
-                                    name, file_path, parent_scene_id, conn_db_id
+                                    r#"{{"type": "closeup_added", "name": "{}", "file_path": "{}", "parent_scene": "{}", "connection_id": "{}", "icon_type": {}}}"#,
+                                    name, file_path, parent_scene_id, conn_db_id, icon_type.unwrap_or(1)
                                 );
                                 let _ = tx.send(Message::Text(response));
                             }
@@ -480,6 +488,7 @@ impl EditorState {
                     world_lat,
                     true,
                     name.as_deref(),
+                    None,
                     None
                 ).await {
                     Ok(conn_db_id) => {
@@ -504,6 +513,7 @@ impl EditorState {
                 target_scene_id: target_scene_id,
                 position: Coordinates { x: position.0 as f32, y: position.1 as f32 },
                 name,
+                icon_index: None,
             };
 
             scene.connections.push(connection);
@@ -532,6 +542,8 @@ impl EditorState {
         new_target_id: i32,
         new_position: (f32, f32),
         new_name: Option<String>,
+        new_icon_type: Option<i32>,
+        new_file_path: Option<String>,
         tx: &mpsc::UnboundedSender<Message>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let found = if let Some((start_scene_id, conn_idx)) = self.connection_index.get(&connection_id).cloned() {
@@ -541,9 +553,18 @@ impl EditorState {
                         connection.target_scene_id = new_target_id;
                         connection.position = Coordinates { x: new_position.0 as f32, y: new_position.1 as f32 };
                         if new_name.is_some() { connection.name = new_name.clone(); }
+                        if new_icon_type.is_some() { connection.icon_index = new_icon_type; }
                         // Persist update in DB
                         if let Some(ref db) = self.db {
-                            let _ = db.update_connection(connection_id as i64, Some(new_target_id as i64), Some(new_position.0 as f32), Some(new_position.1 as f32), new_name.as_deref()).await;
+                            let _ = db.update_connection(
+                                connection_id as i64,
+                                Some(new_target_id as i64),
+                                Some(new_position.0 as f32),
+                                Some(new_position.1 as f32),
+                                new_name.as_deref(),
+                                new_icon_type,
+                                new_file_path.as_deref()
+                            ).await;
                         }
                         true
                     } else { false }
@@ -739,16 +760,19 @@ impl EditorState {
                                     (0.0, 0.0)
                                 };
                                 let name = conn_json["name"].as_str().map(|s| s.to_string());
+                                let ctype = conn_json["connection_type"].as_str().unwrap_or("Transition");
+                                let icon_index = conn_json["icon_index"].as_i64().map(|v| v as i32);
                                 
                                 connections.push(Connection {
                                     id: conn_json["id"].as_i64().unwrap_or(0) as i32,
-                                    connection_type: ConnectionType::Transition,
+                                    connection_type: if ctype.eq_ignore_ascii_case("closeup") { ConnectionType::Closeup } else { ConnectionType::Transition },
                                     target_scene_id: target_id as i32,
                                     position: Coordinates {
                                         x: position.0 as f32,
                                         y: position.1 as f32
                                     },
                                     name,
+                                    icon_index,
                                 });
                             }
                         }
@@ -800,62 +824,39 @@ impl EditorState {
 /// Handle file upload for assets
 pub async fn upload_asset_handler(mut multipart: Multipart) -> impl IntoResponse {
     println!("Upload handler called");
-    
+
+    // Collect fields (order is not guaranteed across all clients)
+    let mut dest_subdir = String::from("insta360"); // default folder for scenes
+    let mut file_bytes: Option<Vec<u8>> = None;
+    let mut orig_filename: Option<String> = None;
+
     loop {
         match multipart.next_field().await {
             Ok(Some(field)) => {
                 let name = field.name().unwrap_or("").to_string();
                 println!("Processing field: {}", name);
-                
-                if name == "file" {
+
+                if name == "type" {
+                    match field.text().await {
+                        Ok(t) => {
+                            let t = t.trim().to_lowercase();
+                            println!("Upload type: {}", t);
+                            // Only allow known subdirs
+                            if t == "closeups" { dest_subdir = "closeups".to_string(); }
+                            else { dest_subdir = "insta360".to_string(); }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to read type field: {}", e);
+                        }
+                    }
+                } else if name == "file" {
                     let filename = field.file_name().unwrap_or("uploaded_file").to_string();
                     println!("Uploading file: {}", filename);
-                    
                     match field.bytes().await {
                         Ok(data) => {
                             println!("File data read successfully, size: {} bytes", data.len());
-                            
-                            // Generate unique filename
-                            let timestamp = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap()
-                                .as_secs();
-                            
-                            // Remove extension from original filename to avoid double extensions
-                            let base_name = StdPath::new(&filename)
-                                .file_stem()
-                                .and_then(|s| s.to_str())
-                                .unwrap_or("uploaded_file");
-                            let ext = StdPath::new(&filename)
-                                .extension()
-                                .and_then(|s| s.to_str())
-                                .unwrap_or("jpg");
-                            let new_filename = format!("uploaded_{}_{}.{}", timestamp, base_name.replace(" ", "_"), ext);
-                            
-                            // Save to assets/insta360 directory
-                            let file_path = format!("assets/insta360/{}", new_filename);
-                            
-                            // Ensure the directory exists
-                            if let Some(parent) = StdPath::new(&file_path).parent() {
-                                if let Err(e) = fs::create_dir_all(parent).await {
-                                    eprintln!("Failed to create directory: {}", e);
-                                }
-                            }
-                            
-                            match fs::write(&file_path, &data).await {
-                                Ok(_) => {
-                                    println!("File saved successfully to: {}", file_path);
-                                    let response = UploadResponse {
-                                        file_path: format!("/{}", file_path),
-                                        message: "File uploaded successfully".to_string(),
-                                    };
-                                    return (StatusCode::OK, Json(response)).into_response();
-                                }
-                                Err(e) => {
-                                    eprintln!("Failed to save file: {}", e);
-                                    return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to save file").into_response();
-                                }
-                            }
+                            file_bytes = Some(data.to_vec());
+                            orig_filename = Some(filename);
                         }
                         Err(e) => {
                             eprintln!("Failed to read file data: Error parsing `multipart/form-data` request: {}", e);
@@ -863,26 +864,63 @@ pub async fn upload_asset_handler(mut multipart: Multipart) -> impl IntoResponse
                         }
                     }
                 } else {
-                    // Skip non-file fields
-                    match field.bytes().await {
-                        Ok(_) => println!("Skipped field: {}", name),
-                        Err(e) => {
-                            eprintln!("Error reading field '{}': {}", name, e);
-                        }
-                    }
+                    // Read and discard other fields to advance the stream
+                    if let Err(e) = field.bytes().await { eprintln!("Error reading field '{}': {}", name, e); }
                 }
             }
-            Ok(None) => {
-                println!("No more fields in multipart request");
-                break;
-            }
+            Ok(None) => { break; }
             Err(e) => {
                 eprintln!("Failed to get next field: Error parsing `multipart/form-data` request: {}", e);
-                return (StatusCode::BAD_REQUEST, format!("Failed to read file data: Error parsing `multipart/form-data` request: {}", e)).into_response();
+                return (StatusCode::BAD_REQUEST, format!("Failed to read multipart data: {}", e)).into_response();
             }
         }
     }
-    
+
+    // After collecting fields, save if we have a file
+    if let (Some(data), Some(filename)) = (file_bytes, orig_filename) {
+        // Generate unique filename
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Remove extension from original filename to avoid double extensions
+        let base_name = StdPath::new(&filename)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("uploaded_file");
+        let ext = StdPath::new(&filename)
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("jpg");
+        let new_filename = format!("uploaded_{}_{}.{}", timestamp, base_name.replace(" ", "_"), ext);
+
+        // Save under selected subdirectory
+        let file_path = format!("assets/{}/{}", dest_subdir, new_filename);
+
+        // Ensure the directory exists
+        if let Some(parent) = StdPath::new(&file_path).parent() {
+            if let Err(e) = fs::create_dir_all(parent).await {
+                eprintln!("Failed to create directory: {}", e);
+            }
+        }
+
+        match fs::write(&file_path, &data).await {
+            Ok(_) => {
+                println!("File saved successfully to: {}", file_path);
+                let response = UploadResponse {
+                    file_path: format!("/{}", file_path),
+                    message: "File uploaded successfully".to_string(),
+                };
+                return (StatusCode::OK, Json(response)).into_response();
+            }
+            Err(e) => {
+                eprintln!("Failed to save file: {}", e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to save file").into_response();
+            }
+        }
+    }
+
     println!("No file field found in multipart request");
     (StatusCode::BAD_REQUEST, "No file uploaded").into_response()
 }

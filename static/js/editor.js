@@ -33,8 +33,9 @@ class VirtualTourEditor {
         // Scene and connection data
         this.connections = [];
         this.scenes = [];
-        this.connectionSprites = []; // Track active connection 3D sprites
+        this.connectionSprites = []; // Track active 3D sprites (connections + closeups)
     this.pendingConnections = []; // Track optimistic adds awaiting server IDs
+    this.pendingCloseups = []; // Track optimistic closeups awaiting server IDs
     this.connectionBaseScale = 32; // base world-unit size for sprites at fov=75
     this.pointerDownOnSprite = null; // { sprite, connection, downX, downY }
     this.dragHoldTimer = null;
@@ -43,9 +44,11 @@ class VirtualTourEditor {
         // File upload management
         this.uploadedFiles = [];
         
-        // User interaction state
+    // User interaction state
         this.isHotspotMode = false;
         this.hotspotCreatePosition = null;
+    this.isCloseupMode = false;
+    this.closeupCreatePosition = null;
         
         // Position logging
         this.positionLoggingInterval = null;
@@ -315,7 +318,7 @@ class VirtualTourEditor {
         const canvas = document.getElementById('viewer-canvas');
         
         // Mouse events
-        canvas.addEventListener('mousedown', (e) => this.onMouseDown(e));
+    canvas.addEventListener('mousedown', (e) => this.onMouseDown(e));
         canvas.addEventListener('mousemove', (e) => this.onMouseMove(e));
         canvas.addEventListener('mouseup', (e) => this.onMouseUp(e));
         canvas.addEventListener('wheel', (e) => this.onWheel(e));
@@ -355,6 +358,8 @@ class VirtualTourEditor {
         const editModal = document.getElementById('edit-connection-modal');
         const addConnModal = document.getElementById('add-connection-modal');
         const addSceneModal = document.getElementById('add-scene-modal');
+        const addCloseupModal = document.getElementById('add-closeup-modal');
+        const editCloseupModal = document.getElementById('edit-closeup-modal');
 
         // Priority: act on the topmost visible modal (edit > add-connection > add-scene)
         if (isVisible(editModal)) {
@@ -373,6 +378,18 @@ class VirtualTourEditor {
             event.preventDefault();
             if (isEnter) this.confirmAddScene();
             else if (isEscape) this.closeAddSceneModal();
+            return;
+        }
+        if (isVisible(addCloseupModal)) {
+            event.preventDefault();
+            if (isEnter) this.confirmAddCloseup();
+            else if (isEscape) this.closeAddCloseupModal();
+            return;
+        }
+        if (isVisible(editCloseupModal)) {
+            event.preventDefault();
+            if (isEnter) this.confirmEditCloseup();
+            else if (isEscape) this.closeEditCloseupModal();
             return;
         }
     }
@@ -406,6 +423,50 @@ class VirtualTourEditor {
                 this.handleFileUpload({ target: { files } });
             }
         });
+
+        // Closeup add modal DnD
+        const cuInput = document.getElementById('closeup-file');
+        const cuArea = document.querySelector('#add-closeup-modal .closeup-upload-area');
+        if (cuInput && cuArea) {
+            cuInput.addEventListener('change', () => this.updateCloseupUploadArea(cuArea, cuInput));
+            ['dragover','dragleave','drop'].forEach(evt => {
+                cuArea.addEventListener(evt, (e) => {
+                    e.preventDefault();
+                    if (evt === 'dragover') cuArea.classList.add('drag-over');
+                    if (evt === 'dragleave') cuArea.classList.remove('drag-over');
+                    if (evt === 'drop') {
+                        cuArea.classList.remove('drag-over');
+                        const files = e.dataTransfer.files;
+                        if (files && files.length === 1) {
+                            cuInput.files = files;
+                            this.updateCloseupUploadArea(cuArea, cuInput);
+                        }
+                    }
+                });
+            });
+        }
+
+        // Closeup edit modal DnD
+        const ecuInput = document.getElementById('edit-closeup-file');
+        const ecuArea = document.querySelector('#edit-closeup-modal .edit-closeup-upload-area');
+        if (ecuInput && ecuArea) {
+            ecuInput.addEventListener('change', () => this.updateCloseupUploadArea(ecuArea, ecuInput));
+            ['dragover','dragleave','drop'].forEach(evt => {
+                ecuArea.addEventListener(evt, (e) => {
+                    e.preventDefault();
+                    if (evt === 'dragover') ecuArea.classList.add('drag-over');
+                    if (evt === 'dragleave') ecuArea.classList.remove('drag-over');
+                    if (evt === 'drop') {
+                        ecuArea.classList.remove('drag-over');
+                        const files = e.dataTransfer.files;
+                        if (files && files.length === 1) {
+                            ecuInput.files = files;
+                            this.updateCloseupUploadArea(ecuArea, ecuInput);
+                        }
+                    }
+                });
+            });
+        }
     }
 
     /**
@@ -456,6 +517,26 @@ class VirtualTourEditor {
             `;
         }
     }
+
+    // Update a specific closeup modal upload area preview
+    updateCloseupUploadArea(areaEl, inputEl) {
+        if (!areaEl || !inputEl) return;
+        const files = inputEl.files || [];
+        if (!files.length) {
+            areaEl.innerHTML = `
+                <div class="upload-icon">📷</div>
+                <div class="upload-text">Click to upload or drag & drop</div>
+                <div class="upload-hint">JPG or PNG, up to ~100MB</div>
+            `;
+            return;
+        }
+        const f = files[0];
+        areaEl.innerHTML = `
+            <div class="upload-icon">✅</div>
+            <div class="upload-text">Selected: ${f.name}</div>
+            <div class="upload-hint">Click to change file</div>
+        `;
+    }
     
     // ====================================
     // MOUSE/TOUCH INTERACTION METHODS
@@ -493,6 +574,11 @@ class VirtualTourEditor {
         if (this.isHotspotMode) {
             this.createHotspotAt(event.clientX, event.clientY);
             // Clear mouse state after hotspot creation to prevent stuck mouse down state
+            this.clearMouseState();
+            return;
+        }
+        if (this.isCloseupMode) {
+            this.createCloseupAt(event.clientX, event.clientY);
             this.clearMouseState();
             return;
         }
@@ -561,14 +647,20 @@ class VirtualTourEditor {
                 return;
             }
 
-            // Treat as click: ctrl+click transitions, else open edit modal
+            // Treat as click: ctrl+click performs action, else open edit modal
+            const isCloseup = String(connection.connection_type).toLowerCase() === 'closeup';
             if (event.ctrlKey) {
-                const targetScene = this.scenes.find(s => s.id === connection.target_scene_id);
-                if (targetScene) {
-                    this.loadScene(targetScene.id);
+                if (isCloseup) {
+                    // Open closeup image in internal viewer if available
+                    const path = connection.file_path || (connection.asset_path);
+                    if (path) this.openImageViewer(path);
+                } else {
+                    const targetScene = this.scenes.find(s => s.id === connection.target_scene_id);
+                    if (targetScene) this.loadScene(targetScene.id);
                 }
             } else {
-                this.openEditConnectionModal(connection);
+                if (isCloseup) this.openEditCloseupModal(connection);
+                else this.openEditConnectionModal(connection);
             }
             // Reset and clear any accidental momentum
             this.blockPan = false;
@@ -609,7 +701,14 @@ class VirtualTourEditor {
             canvas.style.cursor = 'pointer';
             // Show tooltip with connection name or target scene name
             const conn = hit.connection;
-            const label = (conn && conn.name) || this.getSceneName(conn && conn.target_scene_id) || '';
+            let label = '';
+            if (conn) {
+                if (String(conn.connection_type).toLowerCase() === 'closeup') {
+                    label = conn.name || 'Closeup';
+                } else {
+                    label = conn.name || this.getSceneName(conn.target_scene_id) || '';
+                }
+            }
             if (label) this.showTooltip(label, clientX, clientY);
             else this.hideTooltip();
         } else if (!this.isMouseDown) {
@@ -646,6 +745,11 @@ class VirtualTourEditor {
             if (this.isHotspotMode) {
                 this.createHotspotAt(event.touches[0].clientX, event.touches[0].clientY);
                 // Clear mouse state after hotspot creation to prevent stuck mouse down state
+                this.clearMouseState();
+                return;
+            }
+            if (this.isCloseupMode) {
+                this.createCloseupAt(event.touches[0].clientX, event.touches[0].clientY);
                 this.clearMouseState();
                 return;
             }
@@ -853,6 +957,11 @@ class VirtualTourEditor {
                     const id = parseInt(data.connection_id, 10);
                     this.removeConnectionLocally(id);
                 }
+                break;
+            case 'closeup_added':
+                // Backend ack for adding a closeup; contains connection_id, parent_scene, file_path
+                this.reconcileCloseupAdded(data);
+                this.showSuccess('Closeup created successfully');
                 break;
             case 'success':
                 this.showSuccess(data.message, data.title || 'Success');
@@ -1520,11 +1629,19 @@ class VirtualTourEditor {
      * Add a connection marker to the scene using Three.js sprites
      */
     addConnectionMarker(connection) {
-    // Compute world position from stored connection data (supports lon/lat or legacy pixels)
-    const worldPosition = this.computeWorldPositionFromConnection(connection);
-        
-        // Create sprite material with the transition icon
-        const spriteMap = new THREE.TextureLoader().load('/static/assets/transition_icon.png?v=2');
+        // Compute world position from stored connection data (supports lon/lat or legacy pixels)
+        const worldPosition = this.computeWorldPositionFromConnection(connection);
+
+        // Choose sprite icon based on connection type
+        let iconPath = '/static/assets/transition_icon.png?v=2';
+        if (String(connection.connection_type).toLowerCase() === 'closeup') {
+            const idx = connection.icon_index || 1; // 1..3
+            const clamped = Math.max(1, Math.min(3, parseInt(idx, 10) || 1));
+            iconPath = `/static/assets/info${clamped}_icon.png`;
+        }
+
+        // Create sprite material
+        const spriteMap = new THREE.TextureLoader().load(iconPath);
         const spriteMaterial = new THREE.SpriteMaterial({ 
             map: spriteMap,
             transparent: true,
@@ -1533,9 +1650,9 @@ class VirtualTourEditor {
         });
         
         // Create sprite
-    const sprite = new THREE.Sprite(spriteMaterial);
-    // Initial size; will be adjusted each frame in updateConnectionSpriteScales
-    sprite.scale.set(this.connectionBaseScale, this.connectionBaseScale, 1);
+        const sprite = new THREE.Sprite(spriteMaterial);
+        // Initial size; will be adjusted each frame in updateConnectionSpriteScales
+        sprite.scale.set(this.connectionBaseScale, this.connectionBaseScale, 1);
         sprite.position.copy(worldPosition);
         
         // Store connection data in the sprite for click handling
@@ -1727,6 +1844,16 @@ class VirtualTourEditor {
         document.getElementById('add-connection-modal').style.display = 'block';
         this.toggleHotspotMode();
     }
+
+    /** Create closeup at specified screen coordinates */
+    createCloseupAt(clientX, clientY) {
+        const canvas = document.getElementById('viewer-canvas');
+        const rect = canvas.getBoundingClientRect();
+        this.closeupCreatePosition = { x: clientX - rect.left, y: clientY - rect.top };
+        const modal = document.getElementById('add-closeup-modal');
+        if (modal) modal.style.display = 'block';
+        this.toggleCloseupMode();
+    }
     
     /**
      * Update target scene selection dropdown
@@ -1764,6 +1891,14 @@ class VirtualTourEditor {
         } else {
             setBottomToolbarButtonStates(null); // Reset all buttons
         }
+    }
+
+    toggleCloseupMode() {
+        this.isCloseupMode = !this.isCloseupMode;
+        const btn = document.querySelector('[onclick="addInfospot()"]');
+        if (btn) btn.classList.toggle('active', this.isCloseupMode);
+        if (this.isCloseupMode) setBottomToolbarButtonStates('infospot');
+        else setBottomToolbarButtonStates(null);
     }
     
     /**
@@ -1898,6 +2033,19 @@ class VirtualTourEditor {
 
     sendEditConnection(connectionId, newAssetId, newPosition, newName = null) {
         if (window.app && window.app.socket) {
+            const parsedAsset = parseInt(newAssetId, 10);
+            const assetIdSafe = Number.isFinite(parsedAsset) ? parsedAsset : 0;
+            let iconType = null;
+        let newFilePath = null;
+            try {
+                const all = [];
+                for (const s of (this.scenes || [])) { if (Array.isArray(s.connections)) all.push(...s.connections); }
+                const found = all.find(c => c.id == connectionId);
+                if (found && String(found.connection_type).toLowerCase() === 'closeup') {
+                    if (found.icon_index != null) iconType = parseInt(found.icon_index, 10) || 1;
+            if (found.file_path) newFilePath = found.file_path;
+                }
+            } catch (e) {}
             window.app.socket.send(JSON.stringify({
                 action: "EditTour",
                 data: {
@@ -1906,9 +2054,11 @@ class VirtualTourEditor {
                         action: "EditConnection",
                         data: {
                             connection_id: parseInt(connectionId, 10),
-                            new_asset_id: parseInt(newAssetId, 10),
+                            new_asset_id: assetIdSafe,
                             new_position: [Number(newPosition[0]), Number(newPosition[1])],
-                            new_name: newName
+                new_name: newName,
+                new_icon_type: iconType,
+                new_file_path: newFilePath
                         }
                     }
                 }
@@ -1999,11 +2149,11 @@ class VirtualTourEditor {
     /**
      * Upload a single file to server
      */
-    async uploadSingleFile(file) {
+    async uploadSingleFile(file, type = 'insta360') {
         try {
             const formData = new FormData();
             formData.append('file', file);
-            formData.append('type', 'insta360');
+            formData.append('type', type);
             
             const response = await fetch('/upload-asset', {
                 method: 'POST',
@@ -2038,7 +2188,7 @@ class VirtualTourEditor {
                 <div class="progress-bar">
                     <div class="progress-fill" style="width: 0%"></div>
                 </div>
-                <div class="progress-text">Starting upload...</div>
+                               <div class="progress-text">Starting upload...</div>
             </div>
         `;
         
@@ -2214,6 +2364,183 @@ class VirtualTourEditor {
         // Clear mouse state when closing modal to prevent stuck mouse down state
         this.clearMouseState();
     }
+
+    // ===== CLOSEUPS =====
+    closeAddCloseupModal() {
+        const modal = document.getElementById('add-closeup-modal');
+        if (modal) modal.style.display = 'none';
+        const input = document.getElementById('closeup-file');
+        if (input) input.value = '';
+        this.closeupCreatePosition = null;
+        this.clearMouseState();
+    }
+
+    async confirmAddCloseup() {
+        if (!this.closeupCreatePosition) {
+            alert('Click on the panorama to place the closeup');
+            return;
+        }
+        const nameEl = document.getElementById('closeup-name');
+        const iconEls = document.querySelectorAll('input[name="closeup-icon"]');
+        const fileEl = document.getElementById('closeup-file');
+        const name = nameEl ? String(nameEl.value || '').trim() : '';
+        let iconIndex = 1;
+        iconEls.forEach(el => { if (el.checked) iconIndex = parseInt(el.value, 10) || 1; });
+
+        // Convert to lon/lat
+        const dir = this.screenToWorldDirection(this.closeupCreatePosition.x, this.closeupCreatePosition.y);
+        const { lon, lat } = this.vectorToLonLatDeg(dir);
+        const rounded = [Math.round(lon * 100) / 100, Math.round(lat * 100) / 100];
+
+        // Upload file if chosen
+        let filePath = null;
+    if (fileEl && fileEl.files && fileEl.files.length === 1) {
+            try {
+        filePath = await this.uploadSingleFile(fileEl.files[0], 'closeups');
+            } catch (e) {
+                console.error('Closeup upload failed', e);
+            }
+        }
+
+        // Optimistic add in current scene
+        const tempId = -Date.now();
+        const optimistic = {
+            id: tempId,
+            connection_type: 'Closeup',
+            target_scene_id: null,
+            position: rounded,
+            name: name || null,
+            file_path: filePath || null,
+            icon_index: iconIndex
+        };
+        const scene = this.scenes.find(s => s.id == this.currentSceneId);
+        if (scene) {
+            scene.connections = scene.connections || [];
+            scene.connections.push(optimistic);
+            this.addConnectionMarker(optimistic);
+        }
+        this.pendingCloseups.push({
+            tempId,
+            parent_scene: parseInt(this.currentSceneId, 10),
+            name: optimistic.name,
+            file_path: filePath || '',
+            position: rounded,
+            icon_index: iconIndex
+        });
+
+        // Send to backend
+        if (window.app && window.app.socket) {
+            window.app.socket.send(JSON.stringify({
+                action: 'EditTour',
+                data: {
+                    tour_id: this.currentTourId,
+                    editor_action: {
+                        action: 'AddCloseup',
+                        data: {
+                            name: name || 'Closeup',
+                            file_path: filePath || '',
+                            parent_scene_id: parseInt(this.currentSceneId, 10),
+                            position: [rounded[0], rounded[1]],
+                            icon_type: iconIndex
+                        }
+                    }
+                }
+            }));
+        }
+
+        this.closeAddCloseupModal();
+    }
+
+    reconcileCloseupAdded(data) {
+        const parent_scene = parseInt(data.parent_scene);
+        const realConnId = parseInt(data.connection_id);
+        const scene = (this.scenes || []).find(s => s.id == parent_scene);
+        if (!scene || !scene.connections) return;
+        // Find the optimistic entry by tempId or by matching file_path from pending list
+        let pendingIdx = -1;
+        for (let i = this.pendingCloseups.length - 1; i >= 0; i--) {
+            if (this.pendingCloseups[i].parent_scene == parent_scene) { pendingIdx = i; break; }
+        }
+        if (pendingIdx !== -1) {
+            const pending = this.pendingCloseups.splice(pendingIdx, 1)[0];
+            const conn = scene.connections.find(c => c.id === pending.tempId || (c.file_path == pending.file_path && Array.isArray(c.position) && c.position[0] == pending.position[0] && c.position[1] == pending.position[1]));
+            if (conn) {
+                conn.id = realConnId;
+                conn.file_path = data.file_path || conn.file_path;
+                conn.connection_type = 'Closeup';
+                if (data.icon_type != null) conn.icon_index = parseInt(data.icon_type, 10) || 1;
+                // Update sprite entry
+                const entry = this.connectionSprites.find(e => e.connection && e.connection.id === pending.tempId);
+                if (entry) {
+                    entry.connection.id = realConnId;
+                    entry.connection.file_path = conn.file_path;
+                    entry.connection.icon_index = conn.icon_index;
+                    entry.sprite.userData.connection = entry.connection;
+                }
+            }
+        }
+    }
+
+    openEditCloseupModal(connection) {
+        this.activeCloseupForEdit = connection;
+        const nameInput = document.getElementById('edit-closeup-name');
+        const iconEls = document.querySelectorAll('input[name="edit-closeup-icon"]');
+        if (nameInput) nameInput.value = connection.name || '';
+        const idx = Math.max(1, Math.min(3, parseInt(connection.icon_index, 10) || 1));
+        iconEls.forEach(el => { el.checked = (parseInt(el.value, 10) === idx); });
+        const modal = document.getElementById('edit-closeup-modal');
+        if (modal) modal.style.display = 'block';
+    }
+
+    closeEditCloseupModal() {
+        const modal = document.getElementById('edit-closeup-modal');
+        if (modal) modal.style.display = 'none';
+        this.activeCloseupForEdit = null;
+    }
+
+    async confirmEditCloseup() {
+        if (!this.activeCloseupForEdit) return;
+        const c = this.activeCloseupForEdit;
+        const nameInput = document.getElementById('edit-closeup-name');
+        const iconEls = document.querySelectorAll('input[name="edit-closeup-icon"]');
+        const fileEl = document.getElementById('edit-closeup-file');
+        const typed = nameInput ? String(nameInput.value || '').trim() : '';
+        let iconIndex = 1;
+        iconEls.forEach(el => { if (el.checked) iconIndex = parseInt(el.value, 10) || 1; });
+
+        // Optional file replace
+        let newPath = null;
+        if (fileEl && fileEl.files && fileEl.files.length === 1) {
+            newPath = await this.uploadSingleFile(fileEl.files[0], 'closeups');
+        }
+
+        // Update local state
+        c.name = typed || null;
+        c.icon_index = iconIndex;
+        if (newPath) c.file_path = newPath;
+
+        // Refresh sprite icon if changed
+        const entry = this.connectionSprites.find(e => e.connection && e.connection.id == c.id);
+        if (entry) {
+            // Swap texture
+            const clamped = Math.max(1, Math.min(3, parseInt(iconIndex, 10) || 1));
+            const newMap = new THREE.TextureLoader().load(`/static/assets/info${clamped}_icon.png`);
+            entry.sprite.material.map = newMap;
+            entry.sprite.material.needsUpdate = true;
+            entry.connection = c;
+            entry.sprite.userData.connection = c;
+        }
+
+        // Persist editable fields supported by backend (name and position)
+        const posEntry = this.connectionSprites.find(e => e.connection && e.connection.id == c.id);
+        if (posEntry) {
+            const { lon, lat } = this.vectorToLonLatDeg(posEntry.sprite.position);
+            c.position = [parseFloat(lon.toFixed(2)), parseFloat(lat.toFixed(2))];
+        }
+        this.sendEditConnection(c.id, c.target_scene_id, c.position, c.name === null ? '' : c.name);
+        this.showSuccess('Closeup updated');
+        this.closeEditCloseupModal();
+    }
     
     // ====================================
     // SCENE MANAGEMENT ACTIONS
@@ -2263,6 +2590,89 @@ class VirtualTourEditor {
         // Implementation for swapping scene
         alert('Scene swap feature not yet implemented');
         this.closeAllDropdowns();
+    }
+
+    // ===== Image Viewer (zoomable) =====
+    ensureImageViewerWired() {
+        if (this._imageViewerWired) return;
+        this._imageViewerWired = true;
+        const viewer = document.getElementById('image-viewer');
+        const img = document.getElementById('image-viewer-img');
+        const closeBtn = viewer?.querySelector('.image-viewer-close');
+        const backdrop = viewer?.querySelector('.image-viewer-backdrop');
+        if (!viewer || !img) return;
+        let scale = 1;
+        let originX = 0;
+        let originY = 0;
+        let isPanning = false;
+        let startX = 0, startY = 0;
+        const reset = () => { scale = 1; originX = 0; originY = 0; img.style.transform = 'translate(0px, 0px) scale(1)'; };
+        const close = () => { viewer.classList.remove('show'); viewer.style.display = 'none'; img.src = ''; reset(); };
+        closeBtn?.addEventListener('click', close);
+        backdrop?.addEventListener('click', close);
+        viewer.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const delta = Math.sign(e.deltaY);
+            const rect = img.getBoundingClientRect();
+            const cx = e.clientX - rect.left; // cursor within image box
+            const cy = e.clientY - rect.top;
+            const prevScale = scale;
+            scale *= (delta < 0 ? 1.1 : 0.9);
+            scale = Math.min(Math.max(scale, 1), 8);
+            // adjust origin so zoom centers around cursor
+            const dx = (cx - rect.width / 2);
+            const dy = (cy - rect.height / 2);
+            originX = (originX + dx) * (scale / prevScale) - dx;
+            originY = (originY + dy) * (scale / prevScale) - dy;
+            img.style.transform = `translate(${-originX}px, ${-originY}px) scale(${scale})`;
+            img.style.cursor = scale > 1 ? 'grab' : 'zoom-in';
+        }, { passive: false });
+        img.addEventListener('mousedown', (e) => {
+            if (scale <= 1) return;
+            isPanning = true; startX = e.clientX; startY = e.clientY; img.style.cursor = 'grabbing';
+        });
+        window.addEventListener('mousemove', (e) => {
+            if (!isPanning) return;
+            const dx = e.clientX - startX; const dy = e.clientY - startY; startX = e.clientX; startY = e.clientY;
+            originX -= dx; originY -= dy;
+            img.style.transform = `translate(${-originX}px, ${-originY}px) scale(${scale})`;
+        });
+        window.addEventListener('mouseup', () => { if (isPanning) { isPanning = false; img.style.cursor = 'grab'; } });
+        // Touch support
+        let touchStartDist = 0; let panTouch = false;
+        const dist = (t0, t1) => Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
+        img.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 1) { panTouch = scale > 1; startX = e.touches[0].clientX; startY = e.touches[0].clientY; }
+            else if (e.touches.length === 2) { touchStartDist = dist(e.touches[0], e.touches[1]); }
+        }, { passive: true });
+        img.addEventListener('touchmove', (e) => {
+            if (e.touches.length === 2) {
+                e.preventDefault();
+                const d = dist(e.touches[0], e.touches[1]);
+                const prev = scale;
+                scale *= (d > touchStartDist ? 1.02 : 0.98);
+                scale = Math.min(Math.max(scale, 1), 8);
+                touchStartDist = d;
+                img.style.transform = `translate(${-originX}px, ${-originY}px) scale(${scale})`;
+            } else if (panTouch && e.touches.length === 1) {
+                const dx = e.touches[0].clientX - startX; const dy = e.touches[0].clientY - startY; startX = e.touches[0].clientX; startY = e.touches[0].clientY;
+                originX -= dx; originY -= dy;
+                img.style.transform = `translate(${-originX}px, ${-originY}px) scale(${scale})`;
+            }
+        }, { passive: false });
+        img.addEventListener('touchend', () => { panTouch = false; });
+        // Escape to close
+        window.addEventListener('keydown', (e) => { if (viewer.style.display !== 'none' && e.key === 'Escape') close(); });
+        this._imageViewer = { viewer, img, close, reset };
+    }
+
+    openImageViewer(path) {
+        this.ensureImageViewerWired();
+        if (!this._imageViewer) return;
+        const { viewer, img } = this._imageViewer;
+        img.src = path;
+        viewer.style.display = 'block';
+        viewer.classList.add('show');
     }
     
     deleteScene(sceneId) {
@@ -2567,23 +2977,29 @@ function closeEditConnectionModal() {
     if (editor) editor.closeEditConnectionModal();
 }
 
+// Closeup modal wrappers
+function closeAddCloseupModal() { if (editor) editor.closeAddCloseupModal(); }
+function confirmAddCloseup() { if (editor) editor.confirmAddCloseup(); }
+function closeEditCloseupModal() { if (editor) editor.closeEditCloseupModal(); }
+function confirmEditCloseup() { if (editor) editor.confirmEditCloseup(); }
+
 function addInfospot() {
     // Clear mouse state immediately when button is clicked
     if (editor && typeof editor.clearMouseState === 'function') {
         editor.clearMouseState();
     }
     
-    // Toggle infospot mode
-    const isCurrentlyActive = document.querySelector('[onclick="addInfospot()"]').classList.contains('active');
-    
-    if (isCurrentlyActive) {
-        // Cancel infospot mode
-        setBottomToolbarButtonStates(null);
-        if (editor) editor.showInfo('Infospot mode cancelled');
+    if (!editor) return;
+
+    // Toggle closeup mode using the same button
+    const btn = document.querySelector('[onclick="addInfospot()"]');
+    const isActive = btn && btn.classList.contains('active');
+    if (isActive) {
+        editor.toggleCloseupMode(); // will deactivate
+        editor.showInfo('Infospot mode cancelled');
     } else {
-        // Activate infospot mode
-        setBottomToolbarButtonStates('infospot');
-        if (editor) editor.showInfo('Infospot mode activated - Click on the panorama to add an infospot', 'Infospot Mode');
+        editor.toggleCloseupMode(); // will activate
+        editor.showInfo('Infospot mode activated - Click on the panorama to add a closeup', 'Infospot Mode');
     }
 }
 

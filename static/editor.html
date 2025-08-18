@@ -165,10 +165,97 @@
         </div>
     </div>
 
+    <!-- Add Closeup Modal -->
+    <div id="add-closeup-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">Add Closeup</div>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label" for="closeup-name">Title (optional):</label>
+                    <input id="closeup-name" class="form-input" placeholder="e.g. Panel Label" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Icon:</label>
+                    <div class="inline-options">
+                        <label><input type="radio" name="closeup-icon" value="1" checked /> <img src="/static/assets/info1_icon.png" class="icon-img" /></label>
+                        <label><input type="radio" name="closeup-icon" value="2" /> <img src="/static/assets/info2_icon.png" class="icon-img" /></label>
+                        <label><input type="radio" name="closeup-icon" value="3" /> <img src="/static/assets/info3_icon.png" class="icon-img" /></label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="closeup-file">Optional image file (opens on Ctrl+Click):</label>
+                    <div class="upload-area closeup-upload-area" onclick="document.getElementById('closeup-file').click()">
+                        <div class="upload-icon">📷</div>
+                        <div class="upload-text">Click to upload or drag & drop</div>
+                        <div class="upload-hint">JPG or PNG, up to ~100MB</div>
+                    </div>
+                    <input type="file" id="closeup-file" class="file-input" accept="image/*" />
+                </div>
+                <div class="form-group">
+                    
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn" onclick="if (editor) editor.closeAddCloseupModal()">Cancel</button>
+                <button class="btn success" onclick="if (editor) editor.confirmAddCloseup()">Create Closeup</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Closeup Modal -->
+    <div id="edit-closeup-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">Edit Closeup</div>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label" for="edit-closeup-name">Title (optional):</label>
+                    <input id="edit-closeup-name" class="form-input" placeholder="Closeup title" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Icon:</label>
+                    <div class="inline-options">
+                        <label><input type="radio" name="edit-closeup-icon" value="1" /> <img src="/static/assets/info1_icon.png" class="icon-img" /></label>
+                        <label><input type="radio" name="edit-closeup-icon" value="2" /> <img src="/static/assets/info2_icon.png" class="icon-img" /></label>
+                        <label><input type="radio" name="edit-closeup-icon" value="3" /> <img src="/static/assets/info3_icon.png" class="icon-img" /></label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="edit-closeup-file">Replace image (optional):</label>
+                    <div class="upload-area edit-closeup-upload-area" onclick="document.getElementById('edit-closeup-file').click()">
+                        <div class="upload-icon">📷</div>
+                        <div class="upload-text">Click to upload or drag & drop</div>
+                        <div class="upload-hint">JPG or PNG, up to ~100MB</div>
+                    </div>
+                    <input type="file" id="edit-closeup-file" class="file-input" accept="image/*" />
+                </div>
+                <div class="form-group">
+                    
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn" onclick="if (editor) editor.closeEditCloseupModal()">Cancel</button>
+                <button class="btn success" onclick="if (editor) editor.confirmEditCloseup()">Save</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Include Three.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="/static/js/app-base.js"></script>
     <script src="/static/js/editor.js"></script>
+
+    <!-- Image Viewer Modal for Closeups -->
+    <div id="image-viewer" class="image-viewer" style="display:none;">
+        <div class="image-viewer-backdrop"></div>
+        <div class="image-viewer-content">
+            <button class="image-viewer-close" title="Close">×</button>
+            <img id="image-viewer-img" alt="Closeup" />
+        </div>
+    </div>
 </body>
 
 </html>

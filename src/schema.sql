@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS connections (
     world_lat FLOAT NOT NULL,
     is_transition BOOLEAN NOT NULL DEFAULT 0,
     file_path TEXT,
+    icon_type INTEGER,
     FOREIGN KEY (tour_id) REFERENCES tours(id),
     FOREIGN KEY (start_id) REFERENCES assets(id),
     FOREIGN KEY (end_id) REFERENCES assets(id),

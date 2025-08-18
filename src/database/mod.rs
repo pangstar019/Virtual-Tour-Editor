@@ -365,7 +365,7 @@ impl Database {
     /// * `Ok(Some(TourData))` - The tour data with scenes and connections.
     /// * `Ok(None)` - If the tour doesn't exist or doesn't belong to the user.
     /// * `Err(sqlx::Error)` - If the query fails.
-    pub async fn get_tour_with_scenes(&self, username: &str, tour_id: i64) -> Result<Option<serde_json::Value>, sqlx::Error> {
+        pub async fn get_tour_with_scenes(&self, username: &str, tour_id: i64) -> Result<Option<serde_json::Value>, sqlx::Error> {
         // First get the tour
         let tour_row = sqlx::query("SELECT id, tour_name, created_at, modified_at, initial_scene_id, location, has_floorplan, floorplan_id
                                    FROM tours WHERE id = ?1 AND owner = ?2")
@@ -376,7 +376,7 @@ impl Database {
 
         if let Some(tour_row) = tour_row {
             // Get all scenes for this tour
-            let scene_rows = sqlx::query("SELECT id, name, file_path, description, initial_view_x, initial_view_y, north_dir, pov
+            let scene_rows = sqlx::query("SELECT id, name, file_path, initial_view_x, initial_view_y, north_dir, pov
                                          FROM assets WHERE tour_id = ?1 AND is_scene = 1")
                 .bind(tour_id)
                 .fetch_all(&*self.pool)
@@ -387,8 +387,8 @@ impl Database {
                 let scene_id: i64 = scene_row.get("id");
                 
                 // Get connections for this scene
-                let connection_rows = sqlx::query("SELECT id, end_id, name, world_lon, world_lat
-                                                  FROM connections WHERE tour_id = ?1 AND start_id = ?2")
+                    let connection_rows = sqlx::query("SELECT id, end_id, name, world_lon, world_lat, is_transition, file_path, icon_type
+                                                      FROM connections WHERE tour_id = ?1 AND start_id = ?2")
                     .bind(tour_id)
                     .bind(scene_id)
                     .fetch_all(&*self.pool)
@@ -401,11 +401,17 @@ impl Database {
                     let world_lon: f32 = conn_row.get("world_lon");
                     let world_lat: f32 = conn_row.get("world_lat");
                     let name: Option<String> = conn_row.get("name");
+                        let is_transition: bool = conn_row.get("is_transition");
+                        let file_path: Option<String> = conn_row.get("file_path");
+                        let icon_type: Option<i64> = conn_row.get("icon_type");
                     let json = serde_json::json!({
                         "id": id,
                         "target_scene_id": target,
                         "position": [world_lon, world_lat],
-                        "name": name
+                        "name": name,
+                        "file_path": file_path,
+                        "connection_type": if is_transition { "Transition" } else { "Closeup" },
+                        "icon_index": icon_type
                     });
                     connections.push(json);
                 }
@@ -414,7 +420,6 @@ impl Database {
                     "id": scene_id,
                     "name": scene_row.get::<String, _>("name"),
                     "file_path": scene_row.get::<Option<String>, _>("file_path"),
-                    "description": scene_row.get::<Option<String>, _>("description"),
                     "initial_view_x": scene_row.get::<f32, _>("initial_view_x"),
                     "initial_view_y": scene_row.get::<f32, _>("initial_view_y"),
                     "north_dir": scene_row.get::<Option<f32>, _>("north_dir"),
@@ -589,9 +594,9 @@ impl Database {
     /// * `Ok(i64)` - The database ID of the inserted connection
     /// * `Err(sqlx::Error)` - If the insertion fails
     pub async fn save_connection(&self, tour_id: i64, start_scene_db_id: i64, end_scene_db_id: Option<i64>,
-                                world_lon: f32, world_lat: f32, is_transition: bool, name: Option<&str>, file_path: Option<&str>) -> Result<i64, sqlx::Error> {
-        let result = sqlx::query("INSERT INTO connections (tour_id, start_id, end_id, is_transition, name, world_lon, world_lat, file_path)
-                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)")
+                                world_lon: f32, world_lat: f32, is_transition: bool, name: Option<&str>, file_path: Option<&str>, icon_type: Option<i32>) -> Result<i64, sqlx::Error> {
+        let result = sqlx::query("INSERT INTO connections (tour_id, start_id, end_id, is_transition, name, world_lon, world_lat, file_path, icon_type)
+                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)")
             .bind(tour_id)
             .bind(start_scene_db_id)
             .bind(end_scene_db_id)
@@ -600,6 +605,7 @@ impl Database {
             .bind(world_lon)
             .bind(world_lat)
             .bind(file_path)
+            .bind(icon_type)
             .execute(&*self.pool)
             .await?;
 
@@ -608,7 +614,7 @@ impl Database {
 
     /// Updates an existing connection in the database
     pub async fn update_connection(&self, connection_db_id: i64, end_scene_db_id: Option<i64>,
-                                  world_lon: Option<f32>, world_lat: Option<f32>, name: Option<&str>) -> Result<(), sqlx::Error> {
+                                  world_lon: Option<f32>, world_lat: Option<f32>, name: Option<&str>, icon_type: Option<i32>, file_path: Option<&str>) -> Result<(), sqlx::Error> {
         let mut set_clauses: Vec<String> = Vec::new();
         let mut bindings: Vec<String> = Vec::new();
         let mut param_count = 1;
@@ -631,6 +637,16 @@ impl Database {
         if let Some(n) = name {
             set_clauses.push(format!("name = ?{}", param_count));
             bindings.push(n.to_string());
+            param_count += 1;
+        }
+        if let Some(it) = icon_type {
+            set_clauses.push(format!("icon_type = ?{}", param_count));
+            bindings.push(it.to_string());
+            param_count += 1;
+        }
+        if let Some(fp) = file_path {
+            set_clauses.push(format!("file_path = ?{}", param_count));
+            bindings.push(fp.to_string());
             param_count += 1;
         }
 
@@ -659,13 +675,13 @@ impl Database {
     }
 
     /// Saves a closeup asset to the database
-    pub async fn save_closeup(&self, tour_id: i64, name: &str, file_path: &str, description: &str) -> Result<i64, sqlx::Error> {
-        let result = sqlx::query("INSERT INTO assets (tour_id, name, file_path, description, is_scene) 
-                                 VALUES (?1, ?2, ?3, ?4, 0)")
+    pub async fn save_closeup(&self, tour_id: i64, name: &str, file_path: &str, _icon_type: Option<i32>) -> Result<i64, sqlx::Error> {
+        // icon_type is stored on connections, not assets. We ignore it here.
+        let result = sqlx::query("INSERT INTO assets (tour_id, name, file_path, is_scene) 
+                                 VALUES (?1, ?2, ?3, 0)")
             .bind(tour_id)
             .bind(name)
             .bind(file_path)
-            .bind(description)
             .execute(&*self.pool)
             .await?;
 
@@ -681,5 +697,110 @@ impl Database {
             .await?;
 
         Ok(row.map(|r| r.get("id")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn setup_test_db() -> Database {
+        // In-memory SQLite for fast, isolated tests
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .expect("Failed to create in-memory sqlite pool");
+
+        // Apply schema
+        let schema_sql = include_str!("../schema.sql");
+        sqlx::raw_sql(schema_sql)
+            .execute(&pool)
+            .await
+            .expect("Failed to execute schema for tests");
+
+        Database::new(pool)
+    }
+
+    #[tokio::test]
+    async fn test_icon_type_persistence_and_update() {
+        let db = setup_test_db().await;
+
+        // Create user and tour
+        db.register_user("testuser", "password").await.expect("register user");
+        let tour_id = db.create_tour("testuser", "Test Tour", "Testville").await.expect("create tour");
+
+        // Create a scene asset
+        let scene_id = db
+            .save_scene(tour_id, "Scene A", "/assets/scene_a.jpg", None, None, None)
+            .await
+            .expect("save scene");
+
+        // Create a closeup asset
+        let closeup_id = db
+            .save_closeup(tour_id, "Closeup A", "/assets/closeup_a.jpg", None)
+            .await
+            .expect("save closeup");
+
+        // Link scene -> closeup with icon_type 3
+        let conn_id = db
+            .save_connection(
+                tour_id,
+                scene_id,
+                Some(closeup_id),
+                10.0,
+                5.0,
+                false,
+                None,
+                Some("/assets/closeup_a.jpg"),
+                Some(3),
+            )
+            .await
+            .expect("save connection");
+
+        // Read tour_data and verify icon_index=3 and connection_type=Closeup
+        let tour_data = db
+            .get_tour_with_scenes("testuser", tour_id)
+            .await
+            .expect("get tour data")
+            .expect("tour exists");
+        let scenes = tour_data["scenes"].as_array().expect("scenes array");
+        let mut found_icon: Option<i64> = None;
+        let mut found_type: Option<String> = None;
+        for s in scenes {
+            if let Some(conns) = s["connections"].as_array() {
+                for c in conns {
+                    if c["id"].as_i64() == Some(conn_id) {
+                        found_icon = c["icon_index"].as_i64();
+                        found_type = c["connection_type"].as_str().map(|s| s.to_string());
+                    }
+                }
+            }
+        }
+        assert_eq!(found_icon, Some(3), "expected icon_index=3 after insert");
+        assert_eq!(found_type.as_deref(), Some("Closeup"), "expected connection_type=Closeup");
+
+        // Update icon_type to 1 and verify
+    db.update_connection(conn_id, None, None, None, None, Some(1), None)
+            .await
+            .expect("update connection icon_type");
+        let tour_data2 = db
+            .get_tour_with_scenes("testuser", tour_id)
+            .await
+            .expect("get tour data 2")
+            .expect("tour exists 2");
+        let scenes2 = tour_data2["scenes"].as_array().expect("scenes array 2");
+        let mut found_icon2: Option<i64> = None;
+        for s in scenes2 {
+            if let Some(conns) = s["connections"].as_array() {
+                for c in conns {
+                    if c["id"].as_i64() == Some(conn_id) {
+                        found_icon2 = c["icon_index"].as_i64();
+                    }
+                }
+            }
+        }
+        assert_eq!(found_icon2, Some(1), "expected icon_index=1 after update");
     }
 }

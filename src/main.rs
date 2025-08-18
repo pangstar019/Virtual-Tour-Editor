@@ -322,7 +322,6 @@ async fn handle_websocket(socket: WebSocket, state: AppState) {
         name: "".to_string(),
         tx: tx.clone(),
         rx: Arc::new(Mutex::new(receiver)),
-        tours_list: Vec::new(),
         session_token: None,
     };
 

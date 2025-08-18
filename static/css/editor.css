@@ -867,9 +867,130 @@ html {
     border-top: 1px solid #e0e0e0;
 }
 
+/* ==============================
+   Closeup Modal – Dark Theme
+   ============================== */
+#add-closeup-modal .modal-content,
+#edit-closeup-modal .modal-content {
+    background: #0f172a; /* slate-900 */
+    color: #e5e7eb;      /* gray-200 */
+}
+
+#add-closeup-modal .modal-header,
+#edit-closeup-modal .modal-header {
+    background: #111827; /* gray-900 */
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+
+#add-closeup-modal .modal-title,
+#edit-closeup-modal .modal-title {
+    color: #e5e7eb;
+}
+
+#add-closeup-modal .modal-body,
+#edit-closeup-modal .modal-body {
+    background: #0f172a;
+}
+
+#add-closeup-modal .modal-actions,
+#edit-closeup-modal .modal-actions {
+    background: #111827;
+    border-top: 1px solid rgba(255,255,255,0.08);
+}
+
+#add-closeup-modal .form-label,
+#edit-closeup-modal .form-label {
+    color: #e5e7eb;
+}
+
+#add-closeup-modal .form-input,
+#edit-closeup-modal .form-input {
+    background: #0b1220;
+    border: 1px solid rgba(148, 163, 184, 0.35); /* lighter outline */
+    color: #e5e7eb;
+}
+
+#add-closeup-modal .form-input::placeholder,
+#edit-closeup-modal .form-input::placeholder {
+    color: #9ca3af;
+}
+
+#add-closeup-modal .form-input:focus,
+#edit-closeup-modal .form-input:focus {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 2px rgba(59,130,246,0.2);
+}
+
+/* Icon radio group (single select buttons) */
+#add-closeup-modal .inline-options,
+#edit-closeup-modal .inline-options {
+    display: flex;
+    gap: 10px;
+}
+
+#add-closeup-modal .inline-options label,
+#edit-closeup-modal .inline-options label {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 56px;
+    height: 56px;
+    border-radius: 10px;
+    border: 1px solid #243044; /* slate-700 */
+    background: #0b1220;       /* very dark */
+    cursor: pointer;
+    transition: all 0.15s ease;
+    box-shadow: inset 0 0 0 0 rgba(59,130,246,0.0);
+}
+
+#add-closeup-modal .inline-options label:hover,
+#edit-closeup-modal .inline-options label:hover {
+    border-color: #334155; /* slate-600 */
+    transform: translateY(-1px);
+}
+
+#add-closeup-modal .inline-options input[type="radio"],
+#edit-closeup-modal .inline-options input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Make icons smaller and bright on dark */
+#add-closeup-modal .inline-options img.icon-img,
+#edit-closeup-modal .inline-options img.icon-img {
+    width: 28px;
+    height: 28px;
+    filter: brightness(0) invert(1);
+    opacity: 0.9;
+    transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+/* Highlight selection */
+#add-closeup-modal .inline-options label:has(input[type="radio"]:checked),
+#edit-closeup-modal .inline-options label:has(input[type="radio"]:checked) {
+    border-color: #3b82f6;              /* blue-500 */
+    box-shadow: inset 0 0 0 2px rgba(59,130,246,0.45);
+    background: #0d1b2a;
+}
+
+#add-closeup-modal .inline-options label:has(input[type="radio"]:checked) img.icon-img,
+#edit-closeup-modal .inline-options label:has(input[type="radio"]:checked) img.icon-img {
+    opacity: 1;
+    transform: scale(1.06);
+}
+
+/* Fallback highlight for browsers without :has() – emphasize the icon itself */
+#add-closeup-modal .inline-options input[type="radio"]:checked + img.icon-img,
+#edit-closeup-modal .inline-options input[type="radio"]:checked + img.icon-img {
+    opacity: 1;
+    transform: scale(1.06);
+}
+
 /* File Upload Area */
 .upload-area {
-    border: 2px dashed #ddd;
+    border: 2px dashed #cbd5e1; /* slate-300 */
     border-radius: 8px;
     padding: 40px 20px;
     text-align: center;
@@ -880,25 +1001,25 @@ html {
 
 .upload-area:hover,
 .upload-area.drag-over {
-    border-color: #2196F3;
-    background: rgba(33, 150, 243, 0.05);
+    border-color: #60a5fa; /* blue-400 */
+    background: rgba(96, 165, 250, 0.08);
 }
 
 .upload-icon {
-    font-size: 48px;
-    color: #ddd;
+    font-size: 40px;
+    color: #cbd5e1;
     margin-bottom: 10px;
 }
 
 .upload-text {
-    font-size: 16px;
-    color: #666;
+    font-size: 15px;
+    color: #cbd5e1;
     margin-bottom: 5px;
 }
 
 .upload-hint {
     font-size: 12px;
-    color: #999;
+    color: #94a3b8;
 }
 
 .file-input {
@@ -1138,4 +1259,54 @@ html {
 .notification.fade-out {
     opacity: 0;
     transform: translateX(100%);
+}
+
+/* ====================================
+   Image Viewer Overlay (Closeups)
+   ==================================== */
+.image-viewer {
+    position: fixed;
+    inset: 0;
+    display: none;
+    z-index: 2000; /* above modals and canvas */
+}
+
+.image-viewer.show { display: block; }
+
+.image-viewer-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(2px);
+}
+
+.image-viewer-content {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+}
+
+.image-viewer-close {
+    position: absolute;
+    top: 16px;
+    right: 20px;
+    font-size: 28px;
+    line-height: 1;
+    color: #fff;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    z-index: 2001;
+}
+
+#image-viewer-img {
+    max-width: 90vw;
+    max-height: 85vh;
+    object-fit: contain;
+    user-select: none;
+    cursor: zoom-in;
+    transition: transform 0.1s linear;
 }
