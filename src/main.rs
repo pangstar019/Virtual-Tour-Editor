@@ -204,8 +204,6 @@ async fn initialize_db() -> SqlitePool {
         .execute(&pool)
         .await
         .expect("Failed to execute schema");
-
-    // No legacy migration needed: fresh DBs only; world_lon/world_lat are part of schema
     
     println!("Database initialized successfully");
     pool

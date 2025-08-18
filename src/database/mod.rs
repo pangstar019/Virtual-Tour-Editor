@@ -462,8 +462,8 @@ impl Database {
                            north_direction: Option<f32>) -> Result<i64, sqlx::Error> {
         println!("Creating new asset entry for tour_id: {}, name: '{}', file_path: '{}'", tour_id, name, file_path);
         
-        let result = sqlx::query("INSERT INTO assets (tour_id, name, file_path, is_scene, initial_view_x, initial_view_y, north_dir) 
-                                 VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6)")
+    let result = sqlx::query("INSERT INTO assets (tour_id, name, file_path, is_scene, initial_view_x, initial_view_y, north_dir) 
+                 VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6)")
             .bind(tour_id)
             .bind(name)
             .bind(file_path)
@@ -568,13 +568,13 @@ impl Database {
     /// Gets the file path of the initial scene for a tour
     pub async fn get_initial_scene_thumbnail(&self, tour_id: i64, initial_scene_id: Option<i64>) -> Result<Option<String>, sqlx::Error> {
         if let Some(scene_id) = initial_scene_id {
-            let row = sqlx::query("SELECT file_path FROM assets WHERE id = ?1 AND tour_id = ?2 AND is_scene = 1")
+            let row = sqlx::query("SELECT file_path AS display_path FROM assets WHERE id = ?1 AND tour_id = ?2 AND is_scene = 1")
                 .bind(scene_id)
                 .bind(tour_id)
                 .fetch_optional(&*self.pool)
                 .await?;
 
-            Ok(row.and_then(|r| r.get("file_path")))
+            Ok(row.and_then(|r| r.get("display_path")))
         } else {
             Ok(None)
         }
@@ -802,5 +802,60 @@ mod tests {
             }
         }
         assert_eq!(found_icon2, Some(1), "expected icon_index=1 after update");
+    }
+
+    #[tokio::test]
+    async fn test_closeup_title_persisted_on_insert() {
+        let db = setup_test_db().await;
+
+        db.register_user("testuser", "password").await.expect("register user");
+        let tour_id = db.create_tour("testuser", "Test Tour", "Testville").await.expect("create tour");
+
+        let scene_id = db
+            .save_scene(tour_id, "Scene A", "/assets/scene_a.jpg", None, None, None)
+            .await
+            .expect("save scene");
+
+        let closeup_id = db
+            .save_closeup(tour_id, "Closeup A", "/assets/closeup_a.jpg", None)
+            .await
+            .expect("save closeup");
+
+        // Save connection with a title
+        let conn_id = db
+            .save_connection(
+                tour_id,
+                scene_id,
+                Some(closeup_id),
+                12.3,
+                4.5,
+                false,
+                Some("Tag Plate"),
+                Some("/assets/closeup_a.jpg"),
+                Some(2),
+            )
+            .await
+            .expect("save connection with title");
+
+        let tour_data = db
+            .get_tour_with_scenes("testuser", tour_id)
+            .await
+            .expect("get tour")
+            .expect("has tour");
+
+        // Find our connection and assert the name is present
+        let mut found_name: Option<String> = None;
+        if let Some(scenes) = tour_data["scenes"].as_array() {
+            for s in scenes {
+                if let Some(conns) = s["connections"].as_array() {
+                    for c in conns {
+                        if c["id"].as_i64() == Some(conn_id) {
+                            found_name = c["name"].as_str().map(|s| s.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(found_name.as_deref(), Some("Tag Plate"));
     }
 }

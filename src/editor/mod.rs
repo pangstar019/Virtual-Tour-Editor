@@ -232,7 +232,7 @@ impl EditorState {
             0
         };
         
-        let scene = Scene {
+    let scene = Scene {
             id: scene_id as i32,
             name: name.clone(),
             file_path: file_path.clone(),
@@ -253,6 +253,8 @@ impl EditorState {
                 }
             }
         }
+
+    // No derivative generation; previous behavior restored
 
         let response = format!(
             r#"{{"type": "scene_added", "scene": {{"name": "{}", "file_path": "{}", "id": "{}"}}}}"#,
@@ -419,7 +421,17 @@ impl EditorState {
                     // Find the parent scene and add the connection
                     if let Some(scene) = self.scenes.iter_mut().find(|s| s.id == parent_scene_id) {
                         // Save connection to the closeup using numeric scene ID
-                        match db.save_connection(self.tour_id, scene.id as i64, Some(closeup_db_id), position.0 as f32, position.1 as f32, false, None, Some(&file_path), icon_type).await {
+                        match db.save_connection(
+                            self.tour_id,
+                            scene.id as i64,
+                            Some(closeup_db_id),
+                            position.0 as f32,
+                            position.1 as f32,
+                            false,
+                            Some(&name),
+                            Some(&file_path),
+                            icon_type,
+                        ).await {
                             Ok(conn_db_id) => {
                                 println!("Connection to closeup saved with ID: {}", conn_db_id);
                                 
@@ -429,7 +441,7 @@ impl EditorState {
                                     connection_type: ConnectionType::Closeup,
                                     target_scene_id: closeup_db_id as i32,
                                     position: Coordinates { x: position.0 as f32, y: position.1 as f32 },
-                                    name: None,
+                                    name: Some(name.clone()),
                                     icon_index: icon_type,
                                 };
                                 scene.connections.push(connection);
@@ -924,3 +936,5 @@ pub async fn upload_asset_handler(mut multipart: Multipart) -> impl IntoResponse
     println!("No file field found in multipart request");
     (StatusCode::BAD_REQUEST, "No file uploaded").into_response()
 }
+
+// Derivative generation removed
