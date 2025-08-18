@@ -551,6 +551,15 @@ impl Database {
         Ok(())
     }
 
+    /// Clears the initial scene for a tour (sets it to NULL)
+    pub async fn clear_initial_scene(&self, tour_id: i64) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE tours SET initial_scene_id = NULL, modified_at = CURRENT_TIMESTAMP WHERE id = ?1")
+            .bind(tour_id)
+            .execute(&*self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// Gets the file path of the initial scene for a tour
     pub async fn get_initial_scene_thumbnail(&self, tour_id: i64, initial_scene_id: Option<i64>) -> Result<Option<String>, sqlx::Error> {
         if let Some(scene_id) = initial_scene_id {
@@ -580,8 +589,8 @@ impl Database {
     /// * `Ok(i64)` - The database ID of the inserted connection
     /// * `Err(sqlx::Error)` - If the insertion fails
     pub async fn save_connection(&self, tour_id: i64, start_scene_db_id: i64, end_scene_db_id: Option<i64>,
-                                world_lon: f32, world_lat: f32, is_transition: bool, name: Option<&str>) -> Result<i64, sqlx::Error> {
-        let result = sqlx::query("INSERT INTO connections (tour_id, start_id, end_id, is_transition, name, world_lon, world_lat)
+                                world_lon: f32, world_lat: f32, is_transition: bool, name: Option<&str>, file_path: Option<&str>) -> Result<i64, sqlx::Error> {
+        let result = sqlx::query("INSERT INTO connections (tour_id, start_id, end_id, is_transition, name, world_lon, world_lat, file_path)
                                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)")
             .bind(tour_id)
             .bind(start_scene_db_id)
@@ -590,6 +599,7 @@ impl Database {
             .bind(name)
             .bind(world_lon)
             .bind(world_lat)
+            .bind(file_path)
             .execute(&*self.pool)
             .await?;
 

@@ -34,6 +34,7 @@ class VirtualTourEditor {
         this.connections = [];
         this.scenes = [];
         this.connectionSprites = []; // Track active connection 3D sprites
+    this.pendingConnections = []; // Track optimistic adds awaiting server IDs
     this.connectionBaseScale = 32; // base world-unit size for sprites at fov=75
     this.pointerDownOnSprite = null; // { sprite, connection, downX, downY }
     this.dragHoldTimer = null;
@@ -334,6 +335,46 @@ class VirtualTourEditor {
                 this.closeAllDropdowns();
             }
         });
+
+        // Global keyboard shortcuts while modals are open
+        document.addEventListener('keydown', (e) => this.onDocumentKeyDown(e));
+    }
+
+    /**
+     * Handle Enter/Escape keys to confirm/cancel when a modal is open
+     */
+    onDocumentKeyDown(event) {
+        const key = event.key;
+        const isEnter = key === 'Enter';
+        const isEscape = key === 'Escape' || key === 'Esc';
+        if (!isEnter && !isEscape) return;
+
+        // Helper to detect if a modal is visible
+        const isVisible = (el) => !!el && (el.style.display === 'block' || el.style.display === 'flex');
+
+        const editModal = document.getElementById('edit-connection-modal');
+        const addConnModal = document.getElementById('add-connection-modal');
+        const addSceneModal = document.getElementById('add-scene-modal');
+
+        // Priority: act on the topmost visible modal (edit > add-connection > add-scene)
+        if (isVisible(editModal)) {
+            event.preventDefault();
+            if (isEnter) this.confirmEditConnection();
+            else if (isEscape) this.closeEditConnectionModal();
+            return;
+        }
+        if (isVisible(addConnModal)) {
+            event.preventDefault();
+            if (isEnter) this.confirmAddConnection();
+            else if (isEscape) this.closeAddConnectionModal();
+            return;
+        }
+        if (isVisible(addSceneModal)) {
+            event.preventDefault();
+            if (isEnter) this.confirmAddScene();
+            else if (isEscape) this.closeAddSceneModal();
+            return;
+        }
     }
 
     /**
@@ -798,8 +839,20 @@ class VirtualTourEditor {
                 this.handleSceneUpdate(data.scene);
                 break;
             case 'connection_created':
+                // If server ever sends full connection object
                 this.addConnectionToScene(data.connection);
                 this.showSuccess('Connection created successfully');
+                break;
+            case 'connection_added':
+                // Backend currently sends this minimal ack: {connection_id, start_scene, target_scene}
+                this.reconcileConnectionAdded(data);
+                break;
+            case 'connection_deleted':
+                // Remove connection marker and local state when backend confirms deletion
+                if (data.connection_id !== undefined) {
+                    const id = parseInt(data.connection_id, 10);
+                    this.removeConnectionLocally(id);
+                }
                 break;
             case 'success':
                 this.showSuccess(data.message, data.title || 'Success');
@@ -1717,12 +1770,56 @@ class VirtualTourEditor {
      * Delete connection by ID
      */
     deleteConnection(connectionId) {
-        if (confirm('Are you sure you want to delete this connection?')) {
-            if (window.app && window.app.socket) {
-                window.app.socket.send(JSON.stringify({
-                    action: "EditTour",
-                    data: { tour_id: this.currentTourId, editor_action: { action: "DeleteConnection", data: { connection_id: connectionId } } }
-                }));
+        if (!connectionId) return;
+        if (!confirm('Are you sure you want to delete this connection?')) return;
+
+        // Optimistically remove from UI
+        this.removeConnectionLocally(parseInt(connectionId, 10));
+
+        // Close modal if open
+        this.closeEditConnectionModal();
+
+        // Notify backend
+        if (window.app && window.app.socket) {
+            window.app.socket.send(JSON.stringify({
+                action: "EditTour",
+                data: { tour_id: this.currentTourId, editor_action: { action: "DeleteConnection", data: { connection_id: parseInt(connectionId, 10) } } }
+            }));
+        }
+    }
+
+    // Remove a connection's sprite and data locally
+    removeConnectionLocally(connectionId) {
+        // Remove sprite
+        const idx = this.connectionSprites.findIndex(e => e.connection && e.connection.id == connectionId);
+        if (idx !== -1) {
+            const entry = this.connectionSprites[idx];
+            if (entry && entry.sprite) {
+                this.scene.remove(entry.sprite);
+            }
+            this.connectionSprites.splice(idx, 1);
+        }
+
+        // Clear hover/drag state if it referenced this sprite
+        if (this.pointerDownOnSprite && this.pointerDownOnSprite.connection && this.pointerDownOnSprite.connection.id == connectionId) {
+            this.pointerDownOnSprite = null;
+            this.isDraggingConnection = false;
+            this.blockPan = false;
+            document.getElementById('viewer-canvas').style.cursor = '';
+        }
+        this.hideTooltip();
+
+        // Remove from current scene connections
+        const scene = (this.scenes || []).find(s => s.id == this.currentSceneId);
+        if (scene && Array.isArray(scene.connections)) {
+            scene.connections = scene.connections.filter(c => c.id != connectionId);
+        }
+
+        // Also prune from tourData if present
+        if (this.tourData && Array.isArray(this.tourData.scenes)) {
+            const tScene = this.tourData.scenes.find(s => s.id == this.currentSceneId);
+            if (tScene && Array.isArray(tScene.connections)) {
+                tScene.connections = tScene.connections.filter(c => c.id != connectionId);
             }
         }
     }
@@ -1743,11 +1840,14 @@ class VirtualTourEditor {
                 }
             });
         }
-        // Display current lon/lat
-        const coordEl = document.getElementById('edit-connection-coords');
-        if (coordEl && connection.position) {
-            const [lon, lat] = Array.isArray(connection.position) ? connection.position : [connection.position.x, connection.position.y];
-            coordEl.textContent = `Lon: ${lon?.toFixed ? lon.toFixed(2) : lon}, Lat: ${lat?.toFixed ? lat.toFixed(2) : lat}`;
+        // Prefill the name input: custom name if present, otherwise target scene name
+        const nameInput = document.getElementById('edit-connection-name');
+        if (nameInput) {
+            const targetScene = this.scenes.find(s => s.id === connection.target_scene_id);
+            const defaultName = targetScene ? targetScene.name : '';
+            nameInput.value = (connection && connection.name) ? connection.name : defaultName;
+            // Helpful placeholder (kept same as default in case user clears the field)
+            nameInput.placeholder = defaultName || 'e.g. Lobby → Hatches';
         }
         const modal = document.getElementById('edit-connection-modal');
         if (modal) modal.style.display = 'block';
@@ -1756,6 +1856,12 @@ class VirtualTourEditor {
     closeEditConnectionModal() {
         const modal = document.getElementById('edit-connection-modal');
         if (modal) modal.style.display = 'none';
+        // Clear any transient values so they don't leak to the next open
+        const nameInput = document.getElementById('edit-connection-name');
+        if (nameInput) {
+            nameInput.value = '';
+            nameInput.placeholder = 'e.g. Lobby → Hatches';
+        }
         this.activeConnectionForEdit = null;
     }
 
@@ -1764,8 +1870,16 @@ class VirtualTourEditor {
         const connection = this.activeConnectionForEdit;
         const select = document.getElementById('edit-target-scene');
         const newTargetId = select && select.value ? parseInt(select.value, 10) : connection.target_scene_id;
-    const nameInput = document.getElementById('edit-connection-name');
-    const newName = nameInput ? nameInput.value : connection.name || null;
+        const nameInput = document.getElementById('edit-connection-name');
+        const typed = nameInput ? String(nameInput.value || '').trim() : '';
+        const targetScene = this.scenes.find(s => s.id === newTargetId);
+        // Local state: null means "use default (target scene name)"
+        let newName = typed.length ? typed : null;
+        if (targetScene && newName && newName === targetScene.name) {
+            newName = null;
+        }
+        // Server intent: send empty string to clear any previous custom name when using default
+        const serverName = (newName === null) ? '' : newName;
 
         // Ensure we have lon/lat from current sprite (in case user dragged before opening modal)
         const entry = this.connectionSprites.find(e => e.connection.id === connection.id);
@@ -1776,8 +1890,8 @@ class VirtualTourEditor {
 
         // Update local state
         connection.target_scene_id = newTargetId;
-        connection.name = newName;
-        this.sendEditConnection(connection.id, newTargetId, connection.position, newName);
+    connection.name = newName;
+    this.sendEditConnection(connection.id, newTargetId, connection.position, serverName);
         this.showSuccess('Connection updated');
         this.closeEditConnectionModal();
     }
@@ -2015,6 +2129,30 @@ class VirtualTourEditor {
         const { lon, lat } = this.vectorToLonLatDeg(dir);
         const name = nameInput ? nameInput.value : null;
 
+        // Optimistic add: show immediately
+        const rounded = [Math.round(lon * 100) / 100, Math.round(lat * 100) / 100];
+        const tempId = -Date.now();
+        const optimisticConn = {
+            id: tempId,
+            connection_type: 'Transition',
+            target_scene_id: parseInt(targetSceneId, 10),
+            position: rounded,
+            name: name && name.length ? name : null
+        };
+        const scene = this.scenes.find(s => s.id == this.currentSceneId);
+        if (scene) {
+            scene.connections = scene.connections || [];
+            scene.connections.push(optimisticConn);
+            this.addConnectionMarker(optimisticConn);
+        }
+        this.pendingConnections.push({
+            tempId,
+            start_scene: parseInt(this.currentSceneId),
+            target_scene: parseInt(targetSceneId, 10),
+            position: rounded,
+            name: optimisticConn.name
+        });
+
         if (window.app && window.app.socket) {
             window.app.socket.send(JSON.stringify({
                 action: "EditTour",
@@ -2038,6 +2176,36 @@ class VirtualTourEditor {
         }
         
         this.closeAddConnectionModal();
+    }
+
+    // Reconcile backend ack for added connection by replacing tempId with real ID
+    reconcileConnectionAdded(data) {
+        const startId = parseInt(data.start_scene);
+        const targetId = parseInt(data.target_scene);
+        const realId = parseInt(data.connection_id);
+        // Find the most recent pending matching this pair
+        let idx = -1;
+        for (let i = this.pendingConnections.length - 1; i >= 0; i--) {
+            const p = this.pendingConnections[i];
+            if (p.start_scene == startId && p.target_scene == targetId) { idx = i; break; }
+        }
+        if (idx === -1) return;
+        const pending = this.pendingConnections.splice(idx, 1)[0];
+
+        // Update in scenes array
+        const scene = (this.scenes || []).find(s => s.id == pending.start_scene);
+        if (!scene || !scene.connections) return;
+        const conn = scene.connections.find(c => c.id === pending.tempId || (c.target_scene_id == targetId && Array.isArray(c.position) && c.position[0] == pending.position[0] && c.position[1] == pending.position[1]));
+        if (conn) {
+            conn.id = realId;
+        }
+
+        // Update in sprites list
+        const entry = this.connectionSprites.find(e => e.connection && (e.connection.id === pending.tempId));
+        if (entry) {
+            entry.connection.id = realId;
+            entry.sprite.userData.connection = entry.connection;
+        }
     }
     
     closeAddConnectionModal() {

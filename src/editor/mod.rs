@@ -22,6 +22,7 @@ use tokio::sync::mpsc;
 use tokio::fs;
 use std::i32;
 use std::path::Path as StdPath;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Coordinates {
@@ -38,11 +39,12 @@ pub struct Scene {
     pub initial_view: Option<Coordinates>,
     pub north_direction: Option<f32>,
 }
-
+ 
+// Connection types: transition between scenes or closeup link
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ConnectionType {
     Transition,
-    Closeup
+    Closeup,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,21 +52,12 @@ pub struct Connection {
     pub id: i32,
     pub connection_type: ConnectionType,
     pub target_scene_id: i32,
-    pub position: Coordinates, // [lon, lat]
+    pub position: Coordinates,
     pub name: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct EditorState {
-    pub tour_id: i64,
-    pub username: String,
-    pub scenes: Vec<Scene>,
-    pub current_scene_id: Option<i32>,
-    #[serde(skip)]
-    pub db: Option<crate::database::Database>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Actions received from the client/editor UI
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "action", content = "data")]
 pub enum EditorAction {
     AddScene { name: String, file_path: String },
@@ -91,6 +84,20 @@ pub struct UploadResponse {
     pub message: String,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct EditorState {
+    pub tour_id: i64,
+    pub username: String,
+    pub scenes: Vec<Scene>,
+    pub current_scene_id: Option<i32>,
+    #[serde(skip_serializing)]
+    pub db: Option<crate::database::Database>,
+    #[serde(skip_serializing)]
+    pub scenes_index: HashMap<i32, usize>,
+    #[serde(skip_serializing)]
+    pub connection_index: HashMap<i32, (i32, usize)>,
+}
+
 impl EditorState {
     pub fn new(tour_id: i64, username: String, db: Option<crate::database::Database>) -> Self {
         Self {
@@ -99,6 +106,42 @@ impl EditorState {
             scenes: Vec::new(),
             current_scene_id: None,
             db,
+            scenes_index: HashMap::new(),
+            connection_index: HashMap::new(),
+        }
+    }
+
+    fn rebuild_indices(&mut self) {
+        self.scenes_index.clear();
+        self.connection_index.clear();
+        for (si, scene) in self.scenes.iter().enumerate() {
+            self.scenes_index.insert(scene.id, si);
+            for (ci, conn) in scene.connections.iter().enumerate() {
+                if conn.id != 0 { // avoid indexing placeholder IDs
+                    self.connection_index.insert(conn.id, (scene.id, ci));
+                }
+            }
+        }
+    }
+
+    fn rebuild_scene_connection_index(&mut self, scene_id: i32) {
+        // Reindex connections for a single scene (after delete/reorder)
+        if let Some(&si) = self.scenes_index.get(&scene_id) {
+            if let Some(scene) = self.scenes.get(si) {
+                // Remove existing entries for this scene
+                let ids_to_remove: Vec<i32> = self
+                    .connection_index
+                    .iter()
+                    .filter_map(|(cid, (sid, _))| if *sid == scene_id { Some(*cid) } else { None })
+                    .collect();
+                for cid in ids_to_remove { self.connection_index.remove(&cid); }
+                // Reinsert with updated indices
+                for (ci, conn) in scene.connections.iter().enumerate() {
+                    if conn.id != 0 {
+                        self.connection_index.insert(conn.id, (scene_id, ci));
+                    }
+                }
+            }
         }
     }
 
@@ -198,6 +241,8 @@ impl EditorState {
         };
         
         self.scenes.push(scene);
+    // Index the new scene
+    self.scenes_index.insert(scene_id as i32, self.scenes.len() - 1);
         
         // If this is the first scene, set it as the initial scene in the database
         if self.scenes.len() == 1 {
@@ -223,15 +268,13 @@ impl EditorState {
         new_file_path: String,
         tx: &mpsc::UnboundedSender<Message>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(scene) = self.scenes.iter_mut().find(|s| s.id == scene_id) {
+            if let Some(scene) = self.scenes.iter_mut().find(|s| s.id == scene_id) {
             scene.file_path = new_file_path.clone();
             
-            // Update database if available
+            // Update database if available using numeric ID directly
             if let Some(ref db) = self.db {
-                if let Ok(Some(scene_db_id)) = db.get_scene_db_id(self.tour_id, &scene.name).await {
-                    if let Err(e) = db.update_scene(scene_db_id, None, Some(&new_file_path), None, None, None, None).await {
-                        eprintln!("Failed to update scene in database: {}", e);
-                    }
+                if let Err(e) = db.update_scene(scene.id as i64, None, Some(&new_file_path), None, None, None, None).await {
+                    eprintln!("Failed to update scene in database: {}", e);
                 }
             }
             
@@ -254,51 +297,59 @@ impl EditorState {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("DELETE_SCENE: Attempting to delete scene with ID: {}", scene_id);
         
-        // Find the scene to get its name for database lookup
-        let scene_name = self.scenes.iter()
-            .find(|s| s.id == scene_id)
-            .map(|s| s.name.clone());
-        
-        println!("DELETE_SCENE: Found scene name: {:?}", scene_name);
-        
-        // Delete from database if available
+        // Delete from database if available using numeric ID directly
         if let Some(ref db) = self.db {
-            if let Some(name) = &scene_name {
-                println!("DELETE_SCENE: Looking up scene DB ID for tour_id: {}, scene_name: {}", self.tour_id, name);
-                match db.get_scene_db_id(self.tour_id, name).await {
-                    Ok(Some(scene_db_id)) => {
-                        println!("DELETE_SCENE: Found scene DB ID: {}", scene_db_id);
-                        if let Err(e) = db.delete_scene(scene_db_id).await {
-                            eprintln!("Failed to delete scene from database: {}", e);
-                        } else {
-                            println!("Scene '{}' deleted from database", name);
-                        }
-                    },
-                    Ok(None) => {
-                        eprintln!("DELETE_SCENE: Scene not found in database: {}", name);
-                    },
-                    Err(e) => {
-                        eprintln!("DELETE_SCENE: Error looking up scene: {}", e);
-                    }
-                }
+            if let Err(e) = db.delete_scene(scene_id as i64).await {
+                eprintln!("Failed to delete scene from database: {}", e);
             } else {
-                eprintln!("DELETE_SCENE: Scene name not found for ID: {}", scene_id);
+                println!("Scene '{}' deleted from database", scene_id);
             }
         } else {
             eprintln!("DELETE_SCENE: Database not available");
         }
-        
+        // Collect connection IDs that will be removed (outgoing from the scene itself and incoming from others)
+        let mut removed_connection_ids: Vec<i32> = Vec::new();
+
+        // Outgoing: find the scene first to capture connection ids
+        if let Some(&si) = self.scenes_index.get(&scene_id) {
+            if let Some(scene) = self.scenes.get(si) {
+                for c in &scene.connections {
+                    removed_connection_ids.push(c.id);
+                }
+            }
+        }
+
         // Remove the scene
         self.scenes.retain(|s| s.id != scene_id);
-        
-        // Remove all connections to this scene
+
+        // Incoming: remove connections in other scenes that target this scene and record their ids
         for scene in &mut self.scenes {
+            for c in &scene.connections {
+                if c.target_scene_id == scene_id {
+                    removed_connection_ids.push(c.id);
+                }
+            }
             scene.connections.retain(|c| c.target_scene_id != scene_id);
         }
+
+    // Rebuild indices to reflect removals
+    self.rebuild_indices();
         
         // If this was the current scene, clear it
         if self.current_scene_id.as_ref() == Some(&scene_id) {
-            self.current_scene_id = self.scenes.first().map(|s| s.id.clone());
+            self.current_scene_id = self.scenes.first().map(|s| s.id);
+            // Persist new or cleared initial scene
+            if let Some(ref db) = self.db {
+                if let Some(new_id) = self.current_scene_id {
+                    if let Err(e) = db.set_initial_scene(self.tour_id, new_id as i64).await {
+                        eprintln!("Failed to update initial scene after deletion: {}", e);
+                    }
+                } else {
+                    if let Err(e) = db.clear_initial_scene(self.tour_id).await {
+                        eprintln!("Failed to clear initial scene after deletion: {}", e);
+                    }
+                }
+            }
         }
         
         let response = format!(
@@ -306,6 +357,14 @@ impl EditorState {
             scene_id
         );
         let _ = tx.send(Message::Text(response));
+
+        // Notify clients of each removed connection so UIs can clean up markers
+        for cid in removed_connection_ids {
+            let _ = tx.send(Message::Text(format!(
+                r#"{{"type": "connection_deleted", "connection_id": "{}"}}"#,
+                cid
+            )));
+        }
         Ok(())
     }
 
@@ -358,33 +417,30 @@ impl EditorState {
                     
                     // Find the parent scene and add the connection
                     if let Some(scene) = self.scenes.iter_mut().find(|s| s.id == parent_scene_id) {
-                        // Get parent scene database ID for connection
-                        if let Ok(Some(scene_db_id)) = db.get_scene_db_id(self.tour_id, &scene.name).await {
-                            // Save connection to the closeup
-                            match db.save_connection(self.tour_id, scene_db_id, Some(closeup_db_id), position.0 as f32, position.1 as f32, false, None).await {
-                                Ok(conn_db_id) => {
-                                    println!("Connection to closeup saved with ID: {}", conn_db_id);
-                                    
-                                    // Add connection to in-memory structure using database ID
-                                    let connection = Connection {
-                                        id: conn_db_id as i32,
-                                        connection_type: ConnectionType::Closeup,
-                                        target_scene_id: closeup_db_id as i32,
-                                        position: Coordinates { x: position.0 as f32, y: position.1 as f32 },
-                                        name: None,
-                                    };
-                                    scene.connections.push(connection);
-                                    
-                                    let response = format!(
-                                        r#"{{"type": "closeup_added", "name": "{}", "file_path": "{}", "parent_scene": "{}", "connection_id": "{}"}}"#,
-                                        name, file_path, parent_scene_id, conn_db_id
-                                    );
-                                    let _ = tx.send(Message::Text(response));
-                                }
-                                Err(e) => {
-                                    eprintln!("Failed to save closeup connection to database: {}", e);
-                                    let _ = tx.send(Message::Text(r#"{"type": "error", "message": "Failed to save closeup connection"}"#.to_string()));
-                                }
+                        // Save connection to the closeup using numeric scene ID
+                        match db.save_connection(self.tour_id, scene.id as i64, Some(closeup_db_id), position.0 as f32, position.1 as f32, false, None, Some(&file_path)).await {
+                            Ok(conn_db_id) => {
+                                println!("Connection to closeup saved with ID: {}", conn_db_id);
+                                
+                                // Add connection to in-memory structure using database ID
+                                let connection = Connection {
+                                    id: conn_db_id as i32,
+                                    connection_type: ConnectionType::Closeup,
+                                    target_scene_id: closeup_db_id as i32,
+                                    position: Coordinates { x: position.0 as f32, y: position.1 as f32 },
+                                    name: None,
+                                };
+                                scene.connections.push(connection);
+                                
+                                let response = format!(
+                                    r#"{{"type": "closeup_added", "name": "{}", "file_path": "{}", "parent_scene": "{}", "connection_id": "{}"}}"#,
+                                    name, file_path, parent_scene_id, conn_db_id
+                                );
+                                let _ = tx.send(Message::Text(response));
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to save closeup connection to database: {}", e);
+                                let _ = tx.send(Message::Text(r#"{"type": "error", "message": "Failed to save closeup connection"}"#.to_string()));
                             }
                         }
                     }
@@ -410,46 +466,31 @@ impl EditorState {
         name: Option<String>,
         tx: &mpsc::UnboundedSender<Message>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // Get scene names first to avoid borrowing issues
-        let start_scene_name = self.scenes.iter()
-            .find(|s| s.id == start_scene_id)
-            .map(|s| s.name.clone());
-        let target_scene_name = self.scenes.iter()
-            .find(|s| s.id == target_scene_id)
-            .map(|s| s.name.clone());
-        
         if let Some(scene) = self.scenes.iter_mut().find(|s| s.id == start_scene_id) {
             // Determine if provided position is lon/lat
             let (world_lon, world_lat) = (position.0 as f32, position.1 as f32);
 
             // Save connection to database first to get auto-generated ID
             let connection_db_id = if let Some(ref db) = self.db {
-                if let (Some(start_name), Some(target_name)) = (&start_scene_name, &target_scene_name) {
-                    // Get start scene database ID
-                    if let Ok(Some(start_scene_db_id)) = db.get_scene_db_id(self.tour_id, start_name).await {
-                        // Get target scene database ID
-                        if let Ok(Some(target_scene_db_id)) = db.get_scene_db_id(self.tour_id, target_name).await {
-                            match db.save_connection(
-                                self.tour_id,
-                                start_scene_db_id,
-                                Some(target_scene_db_id),
-                                world_lon,
-                                world_lat,
-                                true,
-                                name.as_deref(),
-                            ).await {
-                                Ok(conn_db_id) => {
-                                    println!("Connection saved to database with ID: {}", conn_db_id);
-                                    Some(conn_db_id)
-                                }
-                                Err(e) => {
-                                    eprintln!("Failed to save connection to database: {}", e);
-                                    None
-                                }
-                            }
-                        } else { None }
-                    } else { None }
-                } else { None }
+                match db.save_connection(
+                    self.tour_id,
+                    start_scene_id as i64,
+                    Some(target_scene_id as i64),
+                    world_lon,
+                    world_lat,
+                    true,
+                    name.as_deref(),
+                    None
+                ).await {
+                    Ok(conn_db_id) => {
+                        println!("Connection saved to database with ID: {}", conn_db_id);
+                        Some(conn_db_id)
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to save connection to database: {}", e);
+                        None
+                    }
+                }
             } else {
                 None
             };
@@ -466,6 +507,12 @@ impl EditorState {
             };
 
             scene.connections.push(connection);
+            // Update index for this new connection
+            if let Some(last) = scene.connections.last() { 
+                if last.id != 0 {
+                    self.connection_index.insert(last.id, (start_scene_id, scene.connections.len() - 1));
+                }
+            }
             
             let response = format!(
                 r#"{{"type": "connection_added", "connection_id": "{}", "start_scene": "{}", "target_scene": "{}"}}"#,
@@ -487,24 +534,23 @@ impl EditorState {
         new_name: Option<String>,
         tx: &mpsc::UnboundedSender<Message>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let mut found = false;
-        let mut old_target_scene_name: Option<String> = None;
-        for scene in &mut self.scenes {
-            if let Some(connection) = scene.connections.iter_mut().find(|c| c.id == connection_id) {
-                connection.target_scene_id = new_target_id;
-                connection.position = Coordinates { x: new_position.0 as f32, y: new_position.1 as f32 };
-                if new_name.is_some() { connection.name = new_name.clone(); }
-                found = true;
-                break;
-            }
-        }
-        // Persist update in DB
-        if found {
-            if let Some(ref db) = self.db {
-                let _ = db.update_connection(connection_id as i64, Some(new_target_id as i64), Some(new_position.0 as f32), Some(new_position.1 as f32), new_name.as_deref()).await;
-            }
-        }
-        
+        let found = if let Some((start_scene_id, conn_idx)) = self.connection_index.get(&connection_id).cloned() {
+            if let Some(&scene_idx) = self.scenes_index.get(&start_scene_id) {
+                if let Some(scene) = self.scenes.get_mut(scene_idx) {
+                    if let Some(connection) = scene.connections.get_mut(conn_idx) {
+                        connection.target_scene_id = new_target_id;
+                        connection.position = Coordinates { x: new_position.0 as f32, y: new_position.1 as f32 };
+                        if new_name.is_some() { connection.name = new_name.clone(); }
+                        // Persist update in DB
+                        if let Some(ref db) = self.db {
+                            let _ = db.update_connection(connection_id as i64, Some(new_target_id as i64), Some(new_position.0 as f32), Some(new_position.1 as f32), new_name.as_deref()).await;
+                        }
+                        true
+                    } else { false }
+                } else { false }
+            } else { false }
+        } else { false };
+
         if found {
             let response = format!(
                 r#"{{"type": "connection_edited", "connection_id": "{}"}}"#,
@@ -523,16 +569,23 @@ impl EditorState {
         connection_id: i32,
         tx: &mpsc::UnboundedSender<Message>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let mut found = false;
-        for scene in &mut self.scenes {
-            let original_len = scene.connections.len();
-            scene.connections.retain(|c| c.id != connection_id);
-            if scene.connections.len() < original_len {
-                found = true;
-                break;
-            }
-        }
-        
+        let found = if let Some((start_scene_id, conn_idx)) = self.connection_index.remove(&connection_id) {
+            if let Some(&scene_idx) = self.scenes_index.get(&start_scene_id) {
+                if let Some(scene) = self.scenes.get_mut(scene_idx) {
+                    if conn_idx < scene.connections.len() {
+                        scene.connections.remove(conn_idx);
+                        // Reindex that scene's connections
+                        self.rebuild_scene_connection_index(start_scene_id);
+                        // Persist deletion in DB
+                        if let Some(ref db) = self.db {
+                            let _ = db.delete_connection(connection_id as i64).await;
+                        }
+                        true
+                    } else { false }
+                } else { false }
+            } else { false }
+        } else { false };
+
         if found {
             let response = format!(
                 r#"{{"type": "connection_deleted", "connection_id": "{}"}}"#,
@@ -553,17 +606,15 @@ impl EditorState {
         fov: Option<f32>,
         tx: &mpsc::UnboundedSender<Message>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(scene) = self.scenes.iter_mut().find(|s| s.id == scene_id) {
+            if let Some(scene) = self.scenes.iter_mut().find(|s| s.id == scene_id) {
             scene.initial_view = Some(Coordinates { x: position.0, y: position.1 });
             print!("{:?}", position);
 
             // Update database if available
             if let Some(ref db) = self.db {
-                if let Ok(Some(scene_db_id)) = db.get_scene_db_id(self.tour_id, &scene.name).await {
-                    if let Err(e) = db.update_scene(scene_db_id, None, None, Some(position.0 as f32), Some(position.1 as f32), None, fov).await {
+                if let Err(e) = db.update_scene(scene.id as i64, None, None, Some(position.0 as f32), Some(position.1 as f32), None, fov).await {
                         eprintln!("Failed to update scene initial view in database: {}", e);
                     }
-                }
             }
             
             let _ = tx.send(Message::Text(r#"{"type": "success", "message": "Initial view position saved."}"#.to_string()));
@@ -580,19 +631,17 @@ impl EditorState {
         direction: f32,
         tx: &mpsc::UnboundedSender<Message>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(scene) = self.scenes.iter_mut().find(|s| s.id == scene_id) {
+            if let Some(scene) = self.scenes.iter_mut().find(|s| s.id == scene_id) {
             scene.north_direction = Some(direction);
             
             // Update database if available
             if let Some(ref db) = self.db {
-                if let Ok(Some(scene_db_id)) = db.get_scene_db_id(self.tour_id, &scene.name).await {
-                    if let Err(e) = db.update_scene(scene_db_id, None, None, None, None, Some(direction), None).await {
+                if let Err(e) = db.update_scene(scene.id as i64, None, None, None, None, Some(direction), None).await {
                         eprintln!("Failed to update scene north direction in database: {}", e);
                     } else {
                         println!("North direction updated for scene '{}' in database", scene.name);
                     }
                 }
-            }
             
             let _ = tx.send(Message::Text(r#"{"type": "success", "message": "North direction saved."}"#.to_string()));
         } else {
@@ -734,6 +783,8 @@ impl EditorState {
                 println!("Total scenes loaded: {}", self.scenes.len());
             }
         }
+    // Build fast indices after loading
+    self.rebuild_indices();
         Ok(())
     }
 
