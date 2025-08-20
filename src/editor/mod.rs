@@ -577,6 +577,20 @@ impl EditorState {
                                 new_icon_type,
                                 new_file_path.as_deref()
                             ).await;
+                            // If this connection represents a closeup and a new file path was provided,
+                            // also update the underlying asset (stored in the assets table) so the
+                            // closeup's asset file_path stays in sync with the connection's file_path.
+                            if new_file_path.is_some() {
+                                // Only attempt asset update for closeup-type connections
+                                if let ConnectionType::Closeup = connection.connection_type {
+                                    // target_scene_id stores the asset id for closeups
+                                    let asset_id = connection.target_scene_id as i64;
+                                    if asset_id != 0 {
+                                        // Update the asset's file_path column as well
+                                        let _ = db.update_scene(asset_id, None, new_file_path.as_deref(), None, None, None, None).await;
+                                    }
+                                }
+                            }
                         }
                         true
                     } else { false }
