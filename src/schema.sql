@@ -22,12 +22,14 @@ CREATE TABLE IF NOT EXISTS tours (
     modified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     owner TEXT NOT NULL,
     tour_name TEXT NOT NULL,
-    location TEXT,
+    -- location removed per feature request
     longitude REAL,
     latitude REAL,
     initial_scene_id INTEGER DEFAULT 1,
     has_floorplan BOOLEAN NOT NULL DEFAULT 0,
     floorplan_id INTEGER DEFAULT 1,
+    sort_mode TEXT NOT NULL DEFAULT 'created_at', -- alphabetical | created_at | modified_at
+    sort_direction TEXT NOT NULL DEFAULT 'asc',     -- asc | desc
     FOREIGN KEY (owner) REFERENCES users(name)
 );
 

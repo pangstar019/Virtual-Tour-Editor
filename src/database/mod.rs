@@ -212,15 +212,16 @@ impl Database {
     /// * `Ok(Vec<Tour>)` - A vector of tours created by the user if found.
     /// * `Err(sqlx::Error)` - If the user does not exist or a database error occurs.
     pub async fn get_tours(&self, username: &str) -> Result<Vec<Tour>, sqlx::Error> {
-        let rows = sqlx::query("SELECT id, 
-                                                    tour_name,
-                                                    created_at, 
-                                                    modified_at, 
-                                                    initial_scene_id,
-                                                    location,
-                                                    has_floorplan,
-                                                    floorplan_id
-                                                    FROM tours WHERE owner = ?1")
+    let rows = sqlx::query("SELECT id, 
+                            tour_name,
+                            created_at, 
+                            modified_at, 
+                            initial_scene_id,
+                            sort_mode,
+                            sort_direction,
+                            has_floorplan,
+                            floorplan_id
+                            FROM tours WHERE owner = ?1")
             .bind(username)
             .fetch_all(&*self.pool)
             .await?;
@@ -232,7 +233,8 @@ impl Database {
                 row.get("created_at"),
                 row.get("modified_at"),
                 row.get("initial_scene_id"),
-                row.get("location"),
+                row.get("sort_mode"),
+                row.get("sort_direction"),
                 row.get("has_floorplan"),
                 row.get("floorplan_id"),
             )
@@ -251,12 +253,11 @@ impl Database {
     /// # Returns
     /// * `Ok(i64)` - The ID of the newly created tour.
     /// * `Err(sqlx::Error)` - If the creation fails.
-    pub async fn create_tour(&self, username: &str, tour_name: &str, location: &str) -> Result<i64, sqlx::Error> {
-        let result = sqlx::query("INSERT INTO tours (tour_name, owner, location, created_at, modified_at, initial_scene_id, has_floorplan, floorplan_id) 
-                                  VALUES (?1, ?2, ?3, datetime('now'), datetime('now'), 1, 0, 1)")
+    pub async fn create_tour(&self, username: &str, tour_name: &str, _location: &str) -> Result<i64, sqlx::Error> {
+    let result = sqlx::query("INSERT INTO tours (tour_name, owner, created_at, modified_at, initial_scene_id, has_floorplan, floorplan_id, sort_mode, sort_direction) 
+                  VALUES (?1, ?2, datetime('now'), datetime('now'), 1, 0, 1, 'created_at', 'asc')")
             .bind(tour_name)
             .bind(username)
-            .bind(location)
             .execute(&*self.pool)
             .await?;
 
@@ -329,15 +330,16 @@ impl Database {
     }
 
     pub async fn get_tour(&self, tour_id: i64, username: &str) -> Result<Tour, sqlx::Error> {
-        let row = sqlx::query("SELECT id, 
-                                                    tour_name,
-                                                    created_at, 
-                                                    modified_at, 
-                                                    initial_scene_id,
-                                                    location,
-                                                    has_floorplan,
-                                                    floorplan_id
-                                                    FROM tours WHERE id = ?1 AND owner = ?2")
+    let row = sqlx::query("SELECT id, 
+                            tour_name,
+                            created_at, 
+                            modified_at, 
+                            initial_scene_id,
+                            sort_mode,
+                            sort_direction,
+                            has_floorplan,
+                            floorplan_id
+                            FROM tours WHERE id = ?1 AND owner = ?2")
             .bind(tour_id)
             .bind(username)
             .fetch_one(&*self.pool)
@@ -349,7 +351,8 @@ impl Database {
             row.get("created_at"),
             row.get("modified_at"),
             row.get("initial_scene_id"),
-            row.get("location"),
+            row.get("sort_mode"),
+            row.get("sort_direction"),
             row.get("has_floorplan"),
             row.get("floorplan_id"),
         ))
@@ -367,7 +370,7 @@ impl Database {
     /// * `Err(sqlx::Error)` - If the query fails.
         pub async fn get_tour_with_scenes(&self, username: &str, tour_id: i64) -> Result<Option<serde_json::Value>, sqlx::Error> {
         // First get the tour
-        let tour_row = sqlx::query("SELECT id, tour_name, created_at, modified_at, initial_scene_id, location, has_floorplan, floorplan_id
+    let tour_row = sqlx::query("SELECT id, tour_name, created_at, modified_at, initial_scene_id, sort_mode, sort_direction, has_floorplan, floorplan_id
                                    FROM tours WHERE id = ?1 AND owner = ?2")
             .bind(tour_id)
             .bind(username)
@@ -376,7 +379,7 @@ impl Database {
 
         if let Some(tour_row) = tour_row {
             // Get all scenes for this tour
-            let scene_rows = sqlx::query("SELECT id, name, file_path, initial_view_x, initial_view_y, north_dir, pov
+            let scene_rows = sqlx::query("SELECT id, name, file_path, created_at, modified_at, initial_view_x, initial_view_y, north_dir, pov
                                          FROM assets WHERE tour_id = ?1 AND is_scene = 1")
                 .bind(tour_id)
                 .fetch_all(&*self.pool)
@@ -420,6 +423,8 @@ impl Database {
                     "id": scene_id,
                     "name": scene_row.get::<String, _>("name"),
                     "file_path": scene_row.get::<Option<String>, _>("file_path"),
+                    "created_at": scene_row.get::<String, _>("created_at"),
+                    "modified_at": scene_row.get::<String, _>("modified_at"),
                     "initial_view_x": scene_row.get::<f32, _>("initial_view_x"),
                     "initial_view_y": scene_row.get::<f32, _>("initial_view_y"),
                     "north_dir": scene_row.get::<Option<f32>, _>("north_dir"),
@@ -428,13 +433,55 @@ impl Database {
                 }));
             }
 
+            // If tour has a floorplan, fetch its asset record
+            let has_floorplan: bool = tour_row.get::<i64, _>("has_floorplan") != 0; // SQLite booleans
+            let mut floorplan_json = serde_json::Value::Null;
+            if has_floorplan {
+                if let Ok(Some(fp_row)) = sqlx::query("SELECT id, file_path, name, created_at, modified_at FROM assets WHERE tour_id = ?1 AND is_floorplan = 1 AND id = ?2")
+                    .bind(tour_id)
+                    .bind(tour_row.get::<i64, _>("floorplan_id"))
+                    .fetch_optional(&*self.pool)
+                    .await {
+                    floorplan_json = serde_json::json!({
+                        "id": fp_row.get::<i64, _>("id"),
+                        "file_path": fp_row.get::<Option<String>, _>("file_path"),
+                        "name": fp_row.get::<String, _>("name"),
+                        "created_at": fp_row.get::<String, _>("created_at"),
+                        "modified_at": fp_row.get::<String, _>("modified_at")
+                    });
+                }
+            }
+
+            // Collect floorplan markers if floorplan present
+            let mut floorplan_markers = Vec::new();
+            if has_floorplan {
+                if let Ok(rows) = sqlx::query("SELECT id, end_id, world_lon, world_lat FROM connections WHERE tour_id = ?1 AND is_floorplan = 1 AND start_id = ?2")
+                    .bind(tour_id)
+                    .bind(tour_row.get::<i64, _>("floorplan_id"))
+                    .fetch_all(&*self.pool)
+                    .await {
+                    for r in rows {
+                        floorplan_markers.push(serde_json::json!({
+                            "id": r.get::<i64,_>("id"),
+                            "scene_id": r.get::<i64,_>("end_id"),
+                            "position": [r.get::<f32,_>("world_lon"), r.get::<f32,_>("world_lat")] 
+                        }));
+                    }
+                }
+            }
+
             let tour_data = serde_json::json!({
                 "id": tour_row.get::<i64, _>("id"),
                 "name": tour_row.get::<String, _>("tour_name"),
-                "location": tour_row.get::<Option<String>, _>("location"),
+                "sort_mode": tour_row.get::<Option<String>, _>("sort_mode"),
+                "sort_direction": tour_row.get::<Option<String>, _>("sort_direction"),
                 "created_at": tour_row.get::<String, _>("created_at"),
                 "modified_at": tour_row.get::<String, _>("modified_at"),
                 "initial_scene_id": tour_row.get::<i64, _>("initial_scene_id"),
+                "has_floorplan": has_floorplan,
+                "floorplan_id": tour_row.get::<i64, _>("floorplan_id"),
+                "floorplan": floorplan_json,
+                "floorplan_markers": floorplan_markers,
                 "scenes": scenes
             });
 
@@ -446,14 +493,14 @@ impl Database {
 
     /// Gets a tour with all its scenes and connections by tour_id only (no owner filter)
     pub async fn get_tour_with_scenes_by_id(&self, tour_id: i64) -> Result<Option<serde_json::Value>, sqlx::Error> {
-        let tour_row = sqlx::query("SELECT id, tour_name, created_at, modified_at, initial_scene_id, location, has_floorplan, floorplan_id
+    let tour_row = sqlx::query("SELECT id, tour_name, created_at, modified_at, initial_scene_id, sort_mode, sort_direction, has_floorplan, floorplan_id
                                    FROM tours WHERE id = ?1")
             .bind(tour_id)
             .fetch_optional(&*self.pool)
             .await?;
 
         if let Some(tour_row) = tour_row {
-            let scene_rows = sqlx::query("SELECT id, name, file_path, initial_view_x, initial_view_y, north_dir, pov
+            let scene_rows = sqlx::query("SELECT id, name, file_path, created_at, modified_at, initial_view_x, initial_view_y, north_dir, pov
                                          FROM assets WHERE tour_id = ?1 AND is_scene = 1")
                 .bind(tour_id)
                 .fetch_all(&*self.pool)
@@ -493,6 +540,8 @@ impl Database {
                     "id": scene_id,
                     "name": scene_row.get::<String, _>("name"),
                     "file_path": scene_row.get::<Option<String>, _>("file_path"),
+                    "created_at": scene_row.get::<String, _>("created_at"),
+                    "modified_at": scene_row.get::<String, _>("modified_at"),
                     "initial_view_x": scene_row.get::<f32, _>("initial_view_x"),
                     "initial_view_y": scene_row.get::<f32, _>("initial_view_y"),
                     "north_dir": scene_row.get::<Option<f32>, _>("north_dir"),
@@ -501,13 +550,52 @@ impl Database {
                 }));
             }
 
+            let has_floorplan: bool = tour_row.get::<i64, _>("has_floorplan") != 0;
+            let mut floorplan_json = serde_json::Value::Null;
+            if has_floorplan {
+                if let Ok(Some(fp_row)) = sqlx::query("SELECT id, file_path, name, created_at, modified_at FROM assets WHERE tour_id = ?1 AND is_floorplan = 1 AND id = ?2")
+                    .bind(tour_id)
+                    .bind(tour_row.get::<i64, _>("floorplan_id"))
+                    .fetch_optional(&*self.pool)
+                    .await {
+                    floorplan_json = serde_json::json!({
+                        "id": fp_row.get::<i64, _>("id"),
+                        "file_path": fp_row.get::<Option<String>, _>("file_path"),
+                        "name": fp_row.get::<String, _>("name"),
+                        "created_at": fp_row.get::<String, _>("created_at"),
+                        "modified_at": fp_row.get::<String, _>("modified_at")
+                    });
+                }
+            }
+            let mut floorplan_markers = Vec::new();
+            if has_floorplan {
+                if let Ok(rows) = sqlx::query("SELECT id, end_id, world_lon, world_lat FROM connections WHERE tour_id = ?1 AND is_floorplan = 1 AND start_id = ?2")
+                    .bind(tour_id)
+                    .bind(tour_row.get::<i64, _>("floorplan_id"))
+                    .fetch_all(&*self.pool)
+                    .await {
+                    for r in rows {
+                        floorplan_markers.push(serde_json::json!({
+                            "id": r.get::<i64,_>("id"),
+                            "scene_id": r.get::<i64,_>("end_id"),
+                            "position": [r.get::<f32,_>("world_lon"), r.get::<f32,_>("world_lat")] 
+                        }));
+                    }
+                }
+            }
+
             let tour_data = serde_json::json!({
                 "id": tour_row.get::<i64, _>("id"),
                 "name": tour_row.get::<String, _>("tour_name"),
-                "location": tour_row.get::<Option<String>, _>("location"),
+                "sort_mode": tour_row.get::<Option<String>, _>("sort_mode"),
+                "sort_direction": tour_row.get::<Option<String>, _>("sort_direction"),
                 "created_at": tour_row.get::<String, _>("created_at"),
                 "modified_at": tour_row.get::<String, _>("modified_at"),
                 "initial_scene_id": tour_row.get::<i64, _>("initial_scene_id"),
+                "has_floorplan": has_floorplan,
+                "floorplan_id": tour_row.get::<i64, _>("floorplan_id"),
+                "floorplan": floorplan_json,
+                "floorplan_markers": floorplan_markers,
                 "scenes": scenes
             });
 

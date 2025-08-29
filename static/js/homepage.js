@@ -37,6 +37,17 @@ class HomepageManager {
         this.closeUserManualModal();
       }
     };
+
+    // Enter key submits tour creation when modal open & input focused
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && this.createTourModal.style.display === 'block') {
+        const active = document.activeElement;
+        if (active && active.id === 'tourName') {
+          e.preventDefault();
+          this.submitCreateTour();
+        }
+      }
+    });
   }
   
   /**
@@ -172,6 +183,11 @@ class HomepageManager {
    * Display tours on the homepage
    */
   displayTours(tours) {
+    if (!Array.isArray(tours) || tours.length === 0) {
+      this.showEmptyState();
+      return;
+    }
+
     this.tourListDiv.innerHTML = '';
 
     tours.forEach(tour => {
@@ -190,9 +206,7 @@ class HomepageManager {
         </div>
       `;
 
-      // Add click handler to navigate to editor
       tourDiv.addEventListener('click', () => {
-        // Store tour ID and navigate to editor
         localStorage.setItem('currentTourId', tour.id);
         navigate('editor');
       });
@@ -299,7 +313,6 @@ class HomepageManager {
     this.createTourError.innerText = "";
     this.createTourError.classList.remove('show');
     document.getElementById("tourName").value = "";
-    document.getElementById("tourLocation").value = "";
   }
   
   /**
@@ -307,7 +320,6 @@ class HomepageManager {
    */
   submitCreateTour() {
     const tourName = document.getElementById("tourName").value.trim();
-    const tourLocation = document.getElementById("tourLocation").value.trim();
     
     if (!tourName) {
       this.showError("Please enter a tour name");
@@ -320,8 +332,7 @@ class HomepageManager {
     this.sendToServer(JSON.stringify({
       action: "CreateTour",
       data: {
-        name: tourName,
-        location: tourLocation || "Unknown Location"
+        name: tourName
       },
     }));
   }

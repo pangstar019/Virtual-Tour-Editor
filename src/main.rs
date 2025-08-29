@@ -2,7 +2,7 @@
 //! 
 //! This module contains the main function for the Virtual Tour Editor server.
 //! 
-//! The server is implemented using the `axum` web framework and provides a WebSocket
+//! The server is implemented using the Axum web framework and provides a WebSocket
 //! interface for clients to connect to. The server manages user registration, login,
 //! and tour creation/management.
 
@@ -72,7 +72,6 @@ pub struct RegisterRequest {
 #[derive(Deserialize)]
 pub struct CreateTourRequest {
     name: String,
-    location: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -87,7 +86,7 @@ enum ClientMessage {
     Logout,
     Help,
     ShowTours,
-    CreateTour { name: String, location: String },
+    CreateTour { name: String },
     EditTour { tour_id: i32, editor_action: Option<editor::EditorAction> },
     DeleteTour { tour_id: i32 },
 }
@@ -402,9 +401,22 @@ async fn handle_login_phase(mut user: User, db: Arc<Database>) -> Option<User> {
                     Ok(ClientMessage::Register { username, password }) => {
                         match db.register_user(&username, &password).await {
                             Ok(_) => {
-                                let _ = tx.send(Message::Text(
-                                    format!(r#"{{"message": "Registration successful! Welcome, {}!", "redirect": "login"}}"#, username)
-                                ));
+                                // Immediately create a session token (auto-login)
+                                match db.login_user(&username).await {
+                                    Ok(session_token) => {
+                                        let _ = tx.send(Message::Text(
+                                            format!(r#"{{"message": "Registration successful! Welcome, {}!", "redirect": "homepage", "sessionToken": "{}", "username": "{}"}}"#, username, session_token, username)
+                                        ));
+                                        // Update user data & transition to main client handler
+                                        user.name = username.clone();
+                                        user.session_token = Some(session_token);
+                                        return Some(user.clone());
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Registration succeeded but session creation failed: {}", e);
+                                        let _ = tx.send(Message::Text(r#"{"message": "Registered, but auto-login failed. Please log in manually.", "redirect": "login"}"#.to_string()));
+                                    }
+                                }
                             }
                             Err(e) => {
                                 eprintln!("Registration failed: {}", e);
@@ -474,8 +486,8 @@ async fn handle_client(user: User, db: Arc<Database>) -> bool {
                         let tours_json = get_tours_json(db.clone(), user.name.clone()).await;
                         let _ = tx.send(Message::Text(tours_json));
                     }
-                    Ok(ClientMessage::CreateTour { name, location }) => {
-                        match db.create_tour(&user.name, &name, &location).await {
+                    Ok(ClientMessage::CreateTour { name }) => {
+                        match db.create_tour(&user.name, &name, "").await {
                             Ok(tour_id) => {
                                 let _ = tx.send(Message::Text(
                                     format!(r#"{{"message": "Tour '{}' created successfully!", "tour_id": {}}}"#, name, tour_id)
@@ -588,7 +600,6 @@ async fn handle_client(user: User, db: Arc<Database>) -> bool {
                         }
                     }
                     _ => {
-                        println!("reached end");
                         let _ = tx.send(Message::Text(r#"{"message": "Feature not implemented yet."}"#.to_string()));
                     }
                 }
@@ -630,7 +641,8 @@ async fn get_tours_json(db: Arc<Database>, username: String) -> String {
             "modified_at": tour.modified_at,
             "initial_scene_id": tour.initial_scene_id,
             "initial_scene_thumbnail": initial_scene_thumbnail,
-            "location": tour.location,
+            "sort_mode": tour.sort_mode,
+            "sort_direction": tour.sort_direction,
             "views": 0  // You can implement view tracking later
         }));
     }
@@ -689,7 +701,7 @@ async fn create_tour_handler(
     // TODO: Extract username from session/auth header
     let username = "test_user"; // Placeholder
     
-    match state.database.create_tour(username, &payload.name, &payload.location).await {
+    match state.database.create_tour(username, &payload.name, "").await {
         Ok(tour_id) => Ok(Json(serde_json::json!({
             "success": true,
             "tour_id": tour_id

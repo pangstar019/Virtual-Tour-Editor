@@ -23,6 +23,7 @@ use tokio::fs;
 use std::i32;
 use std::path::Path as StdPath;
 use std::collections::HashMap;
+use sqlx::Row; // for row.get()
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Coordinates {
@@ -77,6 +78,10 @@ pub enum EditorAction {
     DeleteFloorplan { floorplan_id: i32 },
     AddFloorplanConnection { scene_id: i32 },
     DeleteFloorplanConnection { scene_id: i32 },
+    AddFloorplanMarker { scene_id: i32, x: f32, y: f32 },
+    UpdateFloorplanMarker { marker_id: i32, x: f32, y: f32 },
+    DeleteFloorplanMarker { marker_id: i32 },
+    SetSceneSort { mode: String, direction: String },
 }
 
 #[derive(Serialize)]
@@ -146,6 +151,16 @@ impl EditorState {
         }
     }
 
+    /// Touch (update modified_at) for a scene asset in DB
+    async fn touch_scene(&self, scene_id: i32) {
+        if let Some(ref db) = self.db {
+            let _ = sqlx::query("UPDATE assets SET modified_at = CURRENT_TIMESTAMP WHERE id = ?1")
+                .bind(scene_id as i64)
+                .execute(&*db.pool)
+                .await;
+        }
+    }
+
     /// Handle editor actions and return response messages
     pub async fn handle_action(
         &mut self, 
@@ -201,6 +216,18 @@ impl EditorState {
             }
             EditorAction::DeleteFloorplanConnection { scene_id } => {
                 self.delete_floorplan_connection(scene_id, tx).await?;
+            }
+            EditorAction::AddFloorplanMarker { scene_id, x, y } => {
+                self.add_floorplan_marker(scene_id, x, y, tx).await?;
+            }
+            EditorAction::UpdateFloorplanMarker { marker_id, x, y } => {
+                self.update_floorplan_marker(marker_id, x, y, tx).await?;
+            }
+            EditorAction::DeleteFloorplanMarker { marker_id } => {
+                self.delete_floorplan_marker(marker_id, tx).await?;
+            }
+            EditorAction::SetSceneSort { mode, direction } => {
+                self.set_scene_sort(mode, direction, tx).await?;
             }
         }
         Ok(())
@@ -261,6 +288,21 @@ impl EditorState {
             name, file_path, scene_id
         );
         let _ = tx.send(Message::Text(response));
+        Ok(())
+    }
+
+    async fn set_scene_sort(&mut self, mode: String, direction: String, tx: &mpsc::UnboundedSender<Message>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Persist to database
+        if let Some(ref db) = self.db {
+            let _ = sqlx::query("UPDATE tours SET sort_mode = ?1, sort_direction = ?2, modified_at = CURRENT_TIMESTAMP WHERE id = ?3")
+                .bind(&mode)
+                .bind(&direction)
+                .bind(self.tour_id)
+                .execute(&*db.pool)
+                .await;
+        }
+        // Respond to client to acknowledge
+        let _ = tx.send(Message::Text(format!("{{\"type\":\"sort_updated\",\"mode\":\"{}\",\"direction\":\"{}\"}}", mode, direction)));
         Ok(())
     }
 
@@ -457,6 +499,8 @@ impl EditorState {
                                     name, file_path, parent_scene_id, conn_db_id, icon_type.unwrap_or(1)
                                 );
                                 let _ = tx.send(Message::Text(response));
+                                // Update parent scene modified timestamp
+                                self.touch_scene(parent_scene_id).await;
                             }
                             Err(e) => {
                                 eprintln!("Failed to save closeup connection to database: {}", e);
@@ -541,6 +585,8 @@ impl EditorState {
                 connection_id, start_scene_id, target_scene_id
             );
             let _ = tx.send(Message::Text(response));
+            // Touch start scene modified timestamp
+            self.touch_scene(start_scene_id).await;
         } else {
             let _ = tx.send(Message::Text(r#"{"type": "error", "message": "Start scene not found."}"#.to_string()));
         }
@@ -604,6 +650,10 @@ impl EditorState {
                 connection_id
             );
             let _ = tx.send(Message::Text(response));
+            // Touch originating scene's modified timestamp
+            if let Some((start_scene_id, _)) = self.connection_index.get(&connection_id) {
+                self.touch_scene(*start_scene_id).await;
+            }
         } else {
             let _ = tx.send(Message::Text(r#"{"type": "error", "message": "Connection not found."}"#.to_string()));
         }
@@ -616,7 +666,7 @@ impl EditorState {
         connection_id: i32,
         tx: &mpsc::UnboundedSender<Message>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let found = if let Some((start_scene_id, conn_idx)) = self.connection_index.remove(&connection_id) {
+    let found = if let Some((start_scene_id, conn_idx)) = self.connection_index.remove(&connection_id) {
             if let Some(&scene_idx) = self.scenes_index.get(&start_scene_id) {
                 if let Some(scene) = self.scenes.get_mut(scene_idx) {
                     if conn_idx < scene.connections.len() {
@@ -627,6 +677,8 @@ impl EditorState {
                         if let Some(ref db) = self.db {
                             let _ = db.delete_connection(connection_id as i64).await;
                         }
+            // Touch scene modified timestamp
+            self.touch_scene(start_scene_id).await;
                         true
                     } else { false }
                 } else { false }
@@ -665,6 +717,8 @@ impl EditorState {
             }
             
             let _ = tx.send(Message::Text(r#"{"type": "success", "message": "Initial view position saved."}"#.to_string()));
+            // touch scene (update_scene already touched, but harmless) for clarity
+            self.touch_scene(scene_id).await;
         } else {
             let _ = tx.send(Message::Text(r#"{"type": "error", "message": "Scene not found."}"#.to_string()));
         }
@@ -711,44 +765,134 @@ impl EditorState {
     /// Add a floorplan to the tour
     async fn add_floorplan(
         &mut self,
-        _file_path: String,
+        file_path: String,
         tx: &mpsc::UnboundedSender<Message>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // TODO: Implement floorplan functionality
-        let _ = tx.send(Message::Text(r#"{"type": "success", "message": "Floorplan functionality not yet implemented."}"#.to_string()));
+        // Persist floorplan as an asset (is_floorplan=1) and update tour flags
+        if let Some(ref db) = self.db {
+            // Insert asset
+            let result = sqlx::query("INSERT INTO assets (tour_id, name, file_path, is_floorplan, is_scene) VALUES (?1, ?2, ?3, 1, 0)")
+                .bind(self.tour_id)
+                .bind("Floorplan")
+                .bind(&file_path)
+                .execute(&*db.pool)
+                .await?;
+            let floorplan_id = result.last_insert_rowid();
+
+            // Update tour flags
+            sqlx::query("UPDATE tours SET has_floorplan = 1, floorplan_id = ?1, modified_at = CURRENT_TIMESTAMP WHERE id = ?2")
+                .bind(floorplan_id)
+                .bind(self.tour_id)
+                .execute(&*db.pool)
+                .await?;
+
+            let msg = serde_json::json!({
+                "type": "floorplan_added",
+                "floorplan": {"id": floorplan_id, "file_path": file_path}
+            });
+            let _ = tx.send(Message::Text(msg.to_string()));
+        } else {
+            let _ = tx.send(Message::Text(r#"{"type":"error","message":"Database not available."}"#.to_string()));
+        }
         Ok(())
     }
 
     /// Delete a floorplan
     async fn delete_floorplan(
         &mut self,
-        _floorplan_id: i32,
+        floorplan_id: i32,
         tx: &mpsc::UnboundedSender<Message>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // TODO: Implement floorplan functionality
-        let _ = tx.send(Message::Text(r#"{"type": "success", "message": "Floorplan functionality not yet implemented."}"#.to_string()));
+        if let Some(ref db) = self.db {
+            sqlx::query("DELETE FROM assets WHERE id = ?1 AND tour_id = ?2 AND is_floorplan = 1")
+                .bind(floorplan_id)
+                .bind(self.tour_id)
+                .execute(&*db.pool)
+                .await?;
+            sqlx::query("UPDATE tours SET has_floorplan = 0, modified_at = CURRENT_TIMESTAMP WHERE id = ?1")
+                .bind(self.tour_id)
+                .execute(&*db.pool)
+                .await?;
+            let _ = tx.send(Message::Text(format!("{{\"type\":\"floorplan_deleted\",\"floorplan_id\":{}}}", floorplan_id)));
+        } else {
+            let _ = tx.send(Message::Text(r#"{"type":"error","message":"Database not available."}"#.to_string()));
+        }
         Ok(())
     }
 
     /// Add a connection to a floorplan
     async fn add_floorplan_connection(
         &mut self,
-        _scene_id: i32,
+    scene_id: i32,
         tx: &mpsc::UnboundedSender<Message>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // TODO: Implement floorplan functionality
-        let _ = tx.send(Message::Text(r#"{"type": "success", "message": "Floorplan functionality not yet implemented."}"#.to_string()));
+    // Placeholder: future implementation will store per-scene coordinates on floorplan
+    let _ = tx.send(Message::Text(format!("{{\"type\":\"floorplan_connection_added\",\"scene_id\":{}}}", scene_id)));
         Ok(())
     }
 
     /// Delete a floorplan connection
     async fn delete_floorplan_connection(
         &mut self,
-        _scene_id: i32,
+    scene_id: i32,
         tx: &mpsc::UnboundedSender<Message>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // TODO: Implement floorplan functionality
-        let _ = tx.send(Message::Text(r#"{"type": "success", "message": "Floorplan functionality not yet implemented."}"#.to_string()));
+    let _ = tx.send(Message::Text(format!("{{\"type\":\"floorplan_connection_deleted\",\"scene_id\":{}}}", scene_id)));
+        Ok(())
+    }
+
+    async fn add_floorplan_marker(&mut self, scene_id: i32, x: f32, y: f32, tx: &mpsc::UnboundedSender<Message>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if let Some(ref db) = self.db {
+            // Get floorplan id from tour row
+            let row = sqlx::query("SELECT floorplan_id FROM tours WHERE id = ?1")
+                .bind(self.tour_id)
+                .fetch_optional(&*db.pool)
+                .await?;
+            if let Some(r) = row {
+                let floorplan_id: i64 = r.get("floorplan_id");
+                let result = sqlx::query("INSERT INTO connections (tour_id, start_id, end_id, world_lon, world_lat, is_floorplan) VALUES (?1, ?2, ?3, ?4, ?5, 1)")
+                    .bind(self.tour_id)
+                    .bind(floorplan_id)
+                    .bind(scene_id as i64)
+                    .bind(x)
+                    .bind(y)
+                    .execute(&*db.pool)
+                    .await?;
+                let marker_id = result.last_insert_rowid();
+                let msg = serde_json::json!({
+                    "type": "floorplan_marker_added",
+                    "marker": { "id": marker_id, "scene_id": scene_id, "position": [x, y] }
+                });
+                let _ = tx.send(Message::Text(msg.to_string()));
+            }
+        }
+        Ok(())
+    }
+    async fn update_floorplan_marker(&mut self, marker_id: i32, x: f32, y: f32, tx: &mpsc::UnboundedSender<Message>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if let Some(ref db) = self.db {
+            sqlx::query("UPDATE connections SET world_lon = ?1, world_lat = ?2 WHERE id = ?3 AND is_floorplan = 1")
+                .bind(x)
+                .bind(y)
+                .bind(marker_id as i64)
+                .execute(&*db.pool)
+                .await?;
+            let msg = serde_json::json!({
+                "type": "floorplan_marker_updated",
+                "marker_id": marker_id,
+                "position": [x, y]
+            });
+            let _ = tx.send(Message::Text(msg.to_string()));
+        }
+        Ok(())
+    }
+    async fn delete_floorplan_marker(&mut self, marker_id: i32, tx: &mpsc::UnboundedSender<Message>) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if let Some(ref db) = self.db {
+            sqlx::query("DELETE FROM connections WHERE id = ?1 AND is_floorplan = 1")
+                .bind(marker_id as i64)
+                .execute(&*db.pool)
+                .await?;
+            let _ = tx.send(Message::Text(format!("{{\"type\":\"floorplan_marker_deleted\",\"marker_id\":{}}}", marker_id)));
+        }
         Ok(())
     }
 
@@ -869,6 +1013,7 @@ pub async fn upload_asset_handler(mut multipart: Multipart) -> impl IntoResponse
                             println!("Upload type: {}", t);
                             // Only allow known subdirs
                             if t == "closeups" { dest_subdir = "closeups".to_string(); }
+                            else if t == "floorplan" { dest_subdir = "floorplans".to_string(); }
                             else { dest_subdir = "insta360".to_string(); }
                         }
                         Err(e) => {

@@ -276,6 +276,11 @@ button:hover {
   transition: all 0.3s ease;
 }
 
+/* Empty state placeholder should span full grid width when alone */
+.tours-grid:has(.create-new-placeholder:only-child) {
+  grid-template-columns: 1fr;
+}
+
 .create-new-placeholder:hover {
   border-color: rgba(102, 126, 234, 0.6);
   background: linear-gradient(135deg, rgba(102, 126, 234, 0.15), rgba(118, 75, 162, 0.15));

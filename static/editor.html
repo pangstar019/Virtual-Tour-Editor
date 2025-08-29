@@ -14,7 +14,7 @@
         <div class="side-panel">
             <div class="panel-header">
                 <div class="panel-title" id="tour-title">Virtual Tour Editor</div>
-                <div class="panel-subtitle" id="tour-subtitle">Loading tour...</div>
+                <div class="panel-subtitle" id="tour-subtitle" style="display:none"></div>
                 <button class="home-btn" onclick="returnToHomepage()" title="Return to Homepage">
                     🏠 Homepage
                 </button>
@@ -26,10 +26,18 @@
                     <button class="toolbar-btn primary" onclick="showAddSceneModal()">
                         ➕ Add Scenes
                     </button>
+                    <button class="toolbar-btn secondary" onclick="uploadFloorplan()" id="floorplan-upload-btn">
+                        🗺️ Floorplan
+                    </button>
                     <div class="toolbar-row">
-                        <button class="toolbar-btn secondary" onclick="sortScenes()">
-                            ⇵ Sort Scenes
-                        </button>
+                        <div id="scene-sort-controls" class="toolbar-btn secondary" style="padding:4px 6px; display:flex; gap:4px; align-items:center;">
+                            <select id="scene-sort-mode" style="flex:1; font-size:12px;">
+                                <option value="created_at">Created Date</option>
+                                <option value="modified_at">Last Modified</option>
+                                <option value="alphabetical">Name</option>
+                            </select>
+                            <button id="scene-sort-direction" title="Toggle direction" style="font-size:12px;">▲</button>
+                        </div>
                     </div>
                 </div>
 
@@ -71,6 +79,7 @@
                 <button class="toolbar-btn" onclick="addInfospot()">Add Infospot</button>
                 <button class="toolbar-btn" id="link-hotspot-btn" onclick="toggleHotspotMode()">Link Hotspot</button>
                 <button class="toolbar-btn" onclick="setInitialView()">Set Initial View</button>
+                <button class="toolbar-btn" onclick="toggleFloorplanPanel()" id="floorplan-toggle" style="display:none;">Toggle Floorplan</button>
             </div>
 
             <!-- Hotspot Creation Mode Indicator -->
@@ -82,6 +91,24 @@
             <div class="loading" id="loading-indicator">
                 <div class="spinner"></div>
                 <div class="loading-message">Loading virtual tour...</div>
+            </div>
+
+            <!-- Floorplan Panel -->
+            <div id="floorplan-panel" class="floorplan-panel" style="display:none;">
+                <div class="floorplan-header">
+                    <span>Floorplan</span>
+                    <div class="fp-buttons">
+                        <button class="fp-btn" onclick="toggleFloorplanMaximize()" title="Maximize/Restore">⬜</button>
+                        <button class="fp-btn" onclick="removeFloorplanAsset()" title="Delete">🗑️</button>
+                        <button class="fp-btn" onclick="toggleFloorplanPanel()" title="Close">✕</button>
+                    </div>
+                </div>
+                <div id="floorplan-viewport" class="floorplan-viewport">
+                    <div id="floorplan-inner" class="floorplan-inner">
+                        <img id="floorplan-image" src="" alt="Floorplan" class="floorplan-image" />
+                        <div id="floorplan-markers" class="floorplan-markers"></div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

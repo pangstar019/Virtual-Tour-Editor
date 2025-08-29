@@ -293,11 +293,14 @@ class VirtualTourEditor {
         // Keep automatic clearing enabled for proper rendering
         this.renderer.autoClear = true;
         
-        // Create panorama sphere with optimized geometry
-        const sphereGeometry = new THREE.SphereGeometry(500, 32, 16); // Reduced geometry complexity
+    // Create panorama sphere with higher tessellation to reduce visible curvature artefacts
+    // Increased segments (was 32,16). Balance quality vs perf; adjust if perf drops.
+    const sphereGeometry = new THREE.SphereGeometry(500, 120, 80);
         sphereGeometry.scale(-1, 1, 1);
         
-        const sphereMaterial = new THREE.MeshBasicMaterial();
+    const sphereMaterial = new THREE.MeshBasicMaterial();
+    // When a texture is later assigned, ensure max anisotropy + mipmap filtering for crisper verticals
+    this.maxAnisotropy = this.renderer.capabilities.getMaxAnisotropy();
         this.panoramaSphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
         this.scene.add(this.panoramaSphere);
         
@@ -341,6 +344,14 @@ class VirtualTourEditor {
 
         // Global keyboard shortcuts while modals are open
         document.addEventListener('keydown', (e) => this.onDocumentKeyDown(e));
+
+        // Scene sort controls
+        const modeSel = document.getElementById('scene-sort-mode');
+        const dirBtn = document.getElementById('scene-sort-direction');
+        if (modeSel && dirBtn) {
+            modeSel.addEventListener('change', ()=> this.applyAndPersistSceneSort());
+            dirBtn.addEventListener('click', (e)=> { e.preventDefault(); this.toggleSortDirection(); });
+        }
     }
 
     /**
@@ -949,6 +960,39 @@ class VirtualTourEditor {
         console.log('Editor received message:', data);
         
         switch (data.type) {
+            case 'sort_updated':
+                if (data.mode) this.tourData.sort_mode = data.mode;
+                if (data.direction) this.tourData.sort_direction = data.direction;
+                this.updateSceneGallery();
+                break;
+            case 'floorplan_added':
+                this.tourData.floorplan = data.floorplan;
+                this.tourData.has_floorplan = true;
+                this.onFloorplanAdded(data.floorplan);
+                break;
+            case 'floorplan_deleted':
+                this.tourData.floorplan = null;
+                this.tourData.has_floorplan = false;
+                this.onFloorplanDeleted(data.floorplan_id);
+                break;
+            case 'floorplan_marker_added':
+                if (!this.tourData.floorplan_markers) this.tourData.floorplan_markers=[];
+                this.tourData.floorplan_markers.push(data.marker);
+                this.renderFloorplanMarkers();
+                break;
+            case 'floorplan_marker_updated':
+                if (this.tourData.floorplan_markers) {
+                    const m = this.tourData.floorplan_markers.find(mm=>mm.id==data.marker_id);
+                    if (m) m.position=data.position;
+                }
+                this.renderFloorplanMarkers();
+                break;
+            case 'floorplan_marker_deleted':
+                if (this.tourData.floorplan_markers) {
+                    this.tourData.floorplan_markers = this.tourData.floorplan_markers.filter(m=>m.id!=data.marker_id);
+                }
+                this.renderFloorplanMarkers();
+                break;
             case 'tour_data':
                 this.loadTourFromData(data.data);
                 break;
@@ -1062,6 +1106,9 @@ class VirtualTourEditor {
         }
         
         this.hideLoadingState();
+
+    // Initialize floorplan if present
+    this.initFloorplanFromTour(tourData);
     }
     
     /**
@@ -1080,7 +1127,8 @@ class VirtualTourEditor {
     updateTourInfo() {
         const elements = {
             'tour-title': this.tourData.name || 'Virtual Tour Editor',
-            'tour-subtitle': this.tourData.location || 'Loading tour...',
+            // location removed
+            'tour-subtitle': '',
             'current-scene-name': this.tourData.scenes?.length > 0 ? 'Select a scene' : 'No scenes available',
             'tour-info': '' // Leave empty since we removed scene count
         };
@@ -1089,6 +1137,30 @@ class VirtualTourEditor {
             const element = document.getElementById(id);
             if (element) element.textContent = text;
         });
+
+        // Set sort controls to reflect current state
+        const modeSel = document.getElementById('scene-sort-mode');
+        const dirBtn = document.getElementById('scene-sort-direction');
+    if (modeSel) modeSel.value = this.tourData.sort_mode || 'created_at';
+        if (dirBtn) dirBtn.textContent = (this.tourData.sort_direction || 'asc') === 'asc' ? '▲' : '▼';
+    }
+
+    toggleSortDirection() {
+        this.tourData.sort_direction = (this.tourData.sort_direction === 'desc') ? 'asc' : 'desc';
+        const dirBtn = document.getElementById('scene-sort-direction');
+        if (dirBtn) dirBtn.textContent = this.tourData.sort_direction === 'asc' ? '▲' : '▼';
+        this.applyAndPersistSceneSort();
+    }
+
+    applyAndPersistSceneSort() {
+        const modeSel = document.getElementById('scene-sort-mode');
+        if (modeSel) this.tourData.sort_mode = modeSel.value;
+        // Re-render gallery
+        this.updateSceneGallery();
+        // Persist via websocket action
+        if (window.app?.socket?.readyState === WebSocket.OPEN) {
+            window.app.socket.send(JSON.stringify({ action: 'EditTour', data: { tour_id: this.currentTourId, editor_action: { action: 'SetSceneSort', data: { mode: this.tourData.sort_mode, direction: this.tourData.sort_direction } } } }));
+        }
     }
     
     /**
@@ -1104,8 +1176,25 @@ class VirtualTourEditor {
             sceneGallery.innerHTML = this.getNoScenesHTML();
             return;
         }
+
+        // Apply current sort if present
+    const mode = this.tourData.sort_mode || 'created_at';
+        const direction = this.tourData.sort_direction || 'asc';
+        const scenesCopy = [...this.tourData.scenes];
+        scenesCopy.sort((a,b)=>{
+            let res = 0;
+            if (mode === 'alphabetical') {
+                res = a.name.localeCompare(b.name);
+            } else if (mode === 'created_at') {
+                res = (a.created_at||'').localeCompare(b.created_at||'');
+            } else if (mode === 'modified_at') {
+                res = (a.modified_at||'').localeCompare(b.modified_at||'');
+            }
+            return direction === 'asc' ? res : -res;
+        });
+        this.sortedScenes = scenesCopy; // cache if needed
         
-        this.tourData.scenes.forEach(scene => {
+        scenesCopy.forEach(scene => {
             const sceneElement = this.createSceneElement(scene);
             sceneGallery.appendChild(sceneElement);
         });
@@ -1576,6 +1665,9 @@ class VirtualTourEditor {
         texture.minFilter = THREE.LinearMipmapLinearFilter;
         texture.magFilter = THREE.LinearFilter;
         texture.format = THREE.RGBFormat;
+        if (this.maxAnisotropy) {
+            texture.anisotropy = this.maxAnisotropy;
+        }
         
         // Dispose of previous texture if exists to prevent memory leaks
         if (this.currentTexture && this.currentTexture !== texture) {
@@ -3038,6 +3130,165 @@ class VirtualTourEditor {
         }
         return false;
     }
+
+    // =====================
+    // Floorplan methods
+    // =====================
+    onFloorplanAdded(floorplan) {
+        const toggleBtn = document.getElementById('floorplan-toggle');
+        if (toggleBtn) toggleBtn.style.display = 'inline-block';
+        const img = document.getElementById('floorplan-image');
+        if (img && floorplan && floorplan.file_path) img.src = floorplan.file_path;
+        // Initialize markers container if tour already loaded
+        if (this.tourData && this.tourData.floorplan_markers) {
+            this.renderFloorplanMarkers();
+        }
+    }
+    onFloorplanDeleted() {
+        const toggleBtn = document.getElementById('floorplan-toggle');
+        if (toggleBtn) toggleBtn.style.display = 'none';
+        const img = document.getElementById('floorplan-image');
+        if (img) img.src = '';
+        const panel = document.getElementById('floorplan-panel');
+        if (panel) panel.style.display = 'none';
+    }
+    initFloorplanFromTour(tour) {
+        if (tour && tour.has_floorplan && tour.floorplan) {
+            this.onFloorplanAdded(tour.floorplan);
+        }
+    this.floorplanScale = 1;
+    this.floorplanOffset = { x:0, y:0 };
+    this.tourData.floorplan_markers = tour.floorplan_markers || [];
+    this.attachFloorplanEvents();
+    this.renderFloorplanMarkers();
+    }
+    sendAddFloorplanMessage(filePath) {
+        if (!window.app?.socket) return;
+        window.app.socket.send(JSON.stringify({
+            action: 'EditTour',
+            data: {
+                tour_id: this.currentTourId,
+                editor_action: {
+                    action: 'AddFloorplan',
+                    data: { file_path: filePath }
+                }
+            }
+        }));
+    }
+    sendDeleteFloorplanMessage(floorplanId) {
+        if (!window.app?.socket) return;
+        window.app.socket.send(JSON.stringify({
+            action: 'EditTour',
+            data: {
+                tour_id: this.currentTourId,
+                editor_action: {
+                    action: 'DeleteFloorplan',
+                    data: { floorplan_id: floorplanId }
+                }
+            }
+        }));
+    }
+    async uploadFloorplanFile(file) {
+        const formData = new FormData();
+        formData.append('file', file);
+    formData.append('type', 'floorplan');
+        try {
+            const resp = await fetch('/upload-asset', { method: 'POST', body: formData });
+            const json = await resp.json();
+            if (json.file_path) this.sendAddFloorplanMessage(json.file_path);
+        } catch (e) { console.error('Floorplan upload failed', e); }
+    }
+
+    // -------- Floorplan marker + zoom logic --------
+    attachFloorplanEvents() {
+        const viewport = document.getElementById('floorplan-viewport');
+        if (!viewport || viewport._fpBound) return; // avoid double binding
+        viewport._fpBound = true;
+        viewport.addEventListener('wheel', (e)=>{
+            e.preventDefault();
+            const delta = e.deltaY < 0 ? 0.1 : -0.1;
+            const prevScale = this.floorplanScale;
+            this.floorplanScale = Math.min(4, Math.max(0.5, this.floorplanScale + delta));
+            const rect = viewport.getBoundingClientRect();
+            const cx = e.clientX - rect.left - this.floorplanOffset.x;
+            const cy = e.clientY - rect.top - this.floorplanOffset.y;
+            const scaleRatio = this.floorplanScale / prevScale;
+            this.floorplanOffset.x = e.clientX - rect.left - cx * scaleRatio;
+            this.floorplanOffset.y = e.clientY - rect.top - cy * scaleRatio;
+            this.updateFloorplanTransform();
+        });
+        let panning = false; let panStart = {x:0,y:0}; let startOffset={x:0,y:0};
+        viewport.addEventListener('mousedown', (e)=>{
+            if (e.button===1 || e.shiftKey) { // middle or shift pan
+                panning = true; panStart = {x:e.clientX,y:e.clientY}; startOffset={...this.floorplanOffset};
+            }
+        });
+        window.addEventListener('mousemove',(e)=>{ if(panning){ this.floorplanOffset.x = startOffset.x + (e.clientX-panStart.x); this.floorplanOffset.y = startOffset.y + (e.clientY-panStart.y); this.updateFloorplanTransform(); }});
+        window.addEventListener('mouseup',()=>{ panning=false; });
+        viewport.addEventListener('click',(e)=>{
+            // Ignore if dragging/panning
+            if (panning) return;
+            const inner = document.getElementById('floorplan-inner');
+            const rect = viewport.getBoundingClientRect();
+            const localX = (e.clientX - rect.left - this.floorplanOffset.x)/this.floorplanScale;
+            const localY = (e.clientY - rect.top - this.floorplanOffset.y)/this.floorplanScale;
+            const w = inner.clientWidth; const h = inner.clientHeight;
+            if (!w || !h) return;
+            const normX = localX / w; const normY = localY / h;
+            if (normX<0||normX>1||normY<0||normY>1) return;
+            if (!this.currentSceneId) { this.showInfo('Select a scene first.'); return; }
+            // Check if marker exists for scene
+            const existing = (this.tourData.floorplan_markers||[]).find(m=>m.scene_id==this.currentSceneId);
+            if (existing) {
+                // Update position
+                this.sendUpdateFloorplanMarker(existing.id, normX, normY);
+            } else {
+                this.sendAddFloorplanMarker(this.currentSceneId, normX, normY);
+            }
+        });
+    }
+    updateFloorplanTransform() {
+        const inner = document.getElementById('floorplan-inner');
+        if (!inner) return;
+        inner.style.transform = `translate(${this.floorplanOffset.x}px, ${this.floorplanOffset.y}px) scale(${this.floorplanScale})`;
+    }
+    renderFloorplanMarkers() {
+        const container = document.getElementById('floorplan-markers');
+        if (!container) return;
+        container.innerHTML = '';
+        (this.tourData.floorplan_markers||[]).forEach(m=>{
+            const el = document.createElement('div');
+            el.className='floorplan-marker';
+            el.textContent = m.scene_id;
+            el.style.left = (m.position[0]*100)+'%';
+            el.style.top = (m.position[1]*100)+'%';
+            el.dataset.markerId = m.id;
+            el.dataset.sceneId = m.scene_id;
+            el.addEventListener('mousedown',(e)=>{
+                e.stopPropagation();
+                const start = {x:e.clientX,y:e.clientY};
+                const startPos = {x:m.position[0], y:m.position[1]};
+                el.classList.add('dragging');
+                const move = (me)=>{
+                    const dx = (me.clientX-start.x); const dy=(me.clientY-start.y);
+                    const inner = document.getElementById('floorplan-inner');
+                    const w = inner.clientWidth; const h = inner.clientHeight;
+                    const newX = Math.min(1,Math.max(0,startPos.x + dx/(w*this.floorplanScale)));
+                    const newY = Math.min(1,Math.max(0,startPos.y + dy/(h*this.floorplanScale)));
+                    el.style.left = (newX*100)+'%'; el.style.top = (newY*100)+'%';
+                    m.position=[newX,newY];
+                };
+                const up = ()=>{ window.removeEventListener('mousemove',move); window.removeEventListener('mouseup',up); el.classList.remove('dragging'); this.sendUpdateFloorplanMarker(m.id, m.position[0], m.position[1]); };
+                window.addEventListener('mousemove',move); window.addEventListener('mouseup',up);
+            });
+            el.addEventListener('dblclick',(e)=>{ e.stopPropagation(); if(confirm('Delete marker?')) this.sendDeleteFloorplanMarker(m.id); });
+            el.addEventListener('click',(e)=>{ e.stopPropagation(); this.loadScene(m.scene_id); });
+            container.appendChild(el);
+        });
+    }
+    sendAddFloorplanMarker(sceneId, x, y) { if (!window.app?.socket) return; window.app.socket.send(JSON.stringify({ action:'EditTour', data:{ tour_id:this.currentTourId, editor_action:{ action:'AddFloorplanMarker', data:{ scene_id:sceneId, x, y }}}})); }
+    sendUpdateFloorplanMarker(markerId, x, y) { if (!window.app?.socket) return; window.app.socket.send(JSON.stringify({ action:'EditTour', data:{ tour_id:this.currentTourId, editor_action:{ action:'UpdateFloorplanMarker', data:{ marker_id:markerId, x, y }}}})); }
+    sendDeleteFloorplanMarker(markerId) { if (!window.app?.socket) return; window.app.socket.send(JSON.stringify({ action:'EditTour', data:{ tour_id:this.currentTourId, editor_action:{ action:'DeleteFloorplanMarker', data:{ marker_id:markerId }}}})); }
 }
 
 // ====================================
@@ -3097,6 +3348,28 @@ function closeEditConnectionModal() {
 
 // Closeup modal wrappers
 function closeAddCloseupModal() { if (editor) editor.closeAddCloseupModal(); }
+
+function uploadFloorplan() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = (e)=> { const f = e.target.files[0]; if (f && editor) editor.uploadFloorplanFile(f); };
+    input.click();
+}
+function toggleFloorplanPanel() {
+    const panel = document.getElementById('floorplan-panel');
+    if (!panel) return;
+    panel.style.display = (panel.style.display === 'none' || panel.style.display === '') ? 'block' : 'none';
+}
+function removeFloorplanAsset() {
+    if (editor && editor.tourData && editor.tourData.floorplan) {
+        editor.sendDeleteFloorplanMessage(editor.tourData.floorplan.id);
+    }
+}
+function toggleFloorplanMaximize() {
+    const panel = document.getElementById('floorplan-panel');
+    if (!panel) return; panel.classList.toggle('max');
+}
 function confirmAddCloseup() { if (editor) editor.confirmAddCloseup(); }
 function closeEditCloseupModal() { if (editor) editor.closeEditCloseupModal(); }
 function confirmEditCloseup() { if (editor) editor.confirmEditCloseup(); }
@@ -3161,7 +3434,7 @@ function goHome() {
 }
 
 function sortScenes() {
-    alert('Sort scenes feature not yet implemented');
+    // Deprecated placeholder
 }
 
 async function exportCurrentTour() {
