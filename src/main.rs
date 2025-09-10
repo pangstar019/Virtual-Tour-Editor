@@ -135,8 +135,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/tours/:id", delete(delete_tour_handler))
         // Upload route
         .route("/upload-asset", post(editor::upload_asset_handler))
-    // Export route
-    .route("/api/export/:tour_id", get(export_tour_handler))
+        // Export route
+        .route("/api/export/:tour_id", get(export_tour_handler))
         // Assets list route  
         .route("/api/assets", get(list_assets_handler))
         // Static HTML pages
@@ -643,7 +643,7 @@ async fn get_tours_json(db: Arc<Database>, username: String) -> String {
             "initial_scene_thumbnail": initial_scene_thumbnail,
             "sort_mode": tour.sort_mode,
             "sort_direction": tour.sort_direction,
-            "views": 0  // You can implement view tracking later
+            "views": 0
         }));
     }
 
