@@ -79,6 +79,7 @@
                 <button class="toolbar-btn" onclick="addInfospot()">Add Infospot</button>
                 <button class="toolbar-btn" id="link-hotspot-btn" onclick="toggleHotspotMode()">Link Hotspot</button>
                 <button class="toolbar-btn" onclick="setInitialView()">Set Initial View</button>
+                <button class="toolbar-btn" onclick="setNorthDirection()" title="Set current heading as scene north">Set North</button>
                 <button class="toolbar-btn" onclick="toggleFloorplanPanel()" id="floorplan-toggle" style="display:none;">Toggle Floorplan</button>
             </div>
 
@@ -112,7 +113,6 @@
             </div>
         </div>
     </div>
-
     <!-- Notification Container -->
     <div id="notification-container" class="notification-container">
         <!-- Notifications will be dynamically added here -->
@@ -172,6 +172,13 @@
                     <input id="connection-name" class="form-input" placeholder="e.g. To Lobby" />
                     <div class="form-hint">Shown on hover over the connection.</div>
                 </div>
+                    <div class="form-group" style="margin-top:8px;">
+                        <label style="display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer;">
+                            <input type="checkbox" id="create-return-connection" />
+                            <span>Create return connection</span>
+                        </label>
+                        <div style="font-size:11px; color:#888; margin-top:4px; line-height:1.3;">Creates a reverse link in the target scene pointing back here, aligned using both scenes' north direction (defaults to 0 if unset).</div>
+                    </div>
             </div>
             <div class="modal-actions">
                 <button class="btn" onclick="closeAddConnectionModal()">Cancel</button>

@@ -8,6 +8,55 @@ class VirtualTourEditor {
         this.initializeProperties();
         this.init();
     this.blockPan = false; // when pressing on a sprite, prevent camera panning
+        // Start pending connection timeout watcher (every 5s)
+        setInterval(() => {
+            const now = Date.now();
+            const TIMEOUT_MS = 15000; // 15s threshold
+            for (let i = this.pendingConnections.length - 1; i >= 0; i--) {
+                const p = this.pendingConnections[i];
+                if (p.created_at && now - p.created_at > TIMEOUT_MS) {
+                    // Remove optimistic marker & pending entry
+                    const scene = this.scenes.find(s => s.id == p.start_scene);
+                    if (scene && scene.connections) {
+                        scene.connections = scene.connections.filter(c => c.id !== p.tempId);
+                    }
+                    // Remove sprite if visible
+                    const spriteIdx = this.connectionSprites.findIndex(cs => cs.connection && cs.connection.id === p.tempId);
+                    if (spriteIdx !== -1) {
+                        const cs = this.connectionSprites.splice(spriteIdx, 1)[0];
+                        if (cs && cs.sprite) this.scene.remove(cs.sprite);
+                    }
+                    this.pendingConnections.splice(i, 1);
+                    if (this.showError) this.showError('Connection creation timed out');
+                }
+            }
+        }, 5000);
+    }
+
+    // Compute reciprocal heading given source absolute longitude (deg), source north, target north.
+    // Ensures if source hotspot is at true south relative to source north (≈ north+180), the reciprocal
+    // resolves to true north (target north direction) within a small epsilon.
+    computeReciprocalHeading(sourceLon, northSource, northTarget) {
+        const mod360 = d => { let x = d % 360; if (x < 0) x += 360; return x; };
+        // Normalize inputs to 0..360
+        const nS = mod360(northSource);
+        const nT = mod360(northTarget);
+        const sLon = mod360(sourceLon);
+        // Relative angle from source north (0..360)
+        const rel = mod360(sLon - nS); // 0 north, 180 south
+        // Mirror around 0 (north axis)
+        let reciprocalRel = mod360(nT + 180 + rel);
+        // Snapping
+        const EPS = 2;
+        if (Math.abs(rel - 180) <= EPS) {
+            reciprocalRel = 0; // south -> north
+        } else if (rel <= EPS || Math.abs(rel - 360) <= EPS) {
+            reciprocalRel = 180; // north -> south
+        }
+        if (window && window.__debugReciprocal) {
+            console.log('[Reciprocal]', { sourceLon: sLon, northSource: nS, northTarget: nT, rel, reciprocalRel });
+        }
+        return reciprocalRel; // Always 0..360 now
     }
     
     /**
@@ -850,6 +899,8 @@ class VirtualTourEditor {
         this.camera.position.set(0, 0, 0);
         this.camera.up.set(0, 1, 0);
         this.camera.lookAt(dirX, dirY, dirZ);
+        // After orientation changes, update dependent visuals
+    if (this.connectionSprites && this.connectionSprites.length) this.updateConnectionSpriteScales();
     }
     
     /**
@@ -1019,6 +1070,11 @@ class VirtualTourEditor {
             case 'connection_added':
                 // Backend currently sends this minimal ack: {connection_id, start_scene, target_scene}
                 this.reconcileConnectionAdded(data);
+                this.showSuccess('Connection created');
+                break;
+            case 'duplicate_connection':
+                // Future server message when duplicate suppressed
+                this.showInfo ? this.showInfo('Duplicate connection ignored') : console.log('Duplicate connection ignored');
                 break;
             case 'connection_deleted':
                 // Remove connection marker and local state when backend confirms deletion
@@ -1075,7 +1131,20 @@ class VirtualTourEditor {
     async loadTourFromData(tourData) {
         console.log('loadTourFromData called with:', tourData);
         this.tourData = tourData;
-        this.scenes = tourData.scenes || []; // Store scenes for easier access
+        this.scenes = (tourData.scenes || []).map(s => {
+            // Map north_dir -> north_direction for internal consistency
+            if (typeof s.north_dir === 'number' && typeof s.north_direction !== 'number') {
+                let nd = s.north_dir % 360;
+                if (nd < 0) nd += 360;
+                s.north_direction = nd;
+            } else if (typeof s.north_direction === 'number') {
+                // Normalize any existing north_direction
+                let nd = s.north_direction % 360;
+                if (nd < 0) nd += 360;
+                s.north_direction = nd;
+            }
+            return s;
+        }); // Store scenes for easier access
         
         // Update UI immediately
         this.updateUI();
@@ -1171,8 +1240,10 @@ class VirtualTourEditor {
         if (!sceneGallery) return;
         
         sceneGallery.innerHTML = '';
-        
+
+        // Guard against transient empty during initial async scene fetch/render
         if (!this.tourData.scenes || this.tourData.scenes.length === 0) {
+            if (this.isSceneLoading) return; // suppress flash
             sceneGallery.innerHTML = this.getNoScenesHTML();
             return;
         }
@@ -1321,9 +1392,23 @@ class VirtualTourEditor {
         // Find and update the scene in local data
         const sceneIndex = this.tourData.scenes.findIndex(s => s.id == updatedScene.id);
         if (sceneIndex !== -1) {
-            this.tourData.scenes[sceneIndex] = updatedScene;
-            
-            // Update the scene gallery to reflect changes
+            const existing = this.tourData.scenes[sceneIndex];
+            // Preserve transient client state (connections array if already loaded, thumbnails, north_direction mapping)
+            const preservedConnections = existing.connections && existing.connections.length ? existing.connections : updatedScene.connections;
+            const merged = {
+                ...existing,
+                ...updatedScene,
+                connections: preservedConnections,
+                north_direction: typeof updatedScene.north_dir === 'number'
+                    ? (function(nd){ nd = nd % 360; if (nd < 0) nd += 360; return nd; })(updatedScene.north_dir)
+                    : (existing.north_direction !== undefined ? existing.north_direction : undefined)
+            };
+            // Avoid losing computed reciprocal markers etc.
+            this.tourData.scenes[sceneIndex] = merged;
+            // Update cached this.scenes reference if used elsewhere
+            const scenesRefIndex = this.scenes.findIndex(s=>s.id==merged.id);
+            if (scenesRefIndex !== -1) this.scenes[scenesRefIndex] = merged;
+            // Re-render list without changing sort order beyond current criteria
             this.updateSceneGallery();
             
             // If this is the current scene, update the header
@@ -1426,6 +1511,7 @@ class VirtualTourEditor {
      */
     async loadScene(sceneId) {
         console.log('loadScene called with sceneId:', sceneId, 'type:', typeof sceneId);
+        this.isSceneLoading = true;
         
         if (!this.tourData.scenes || this.tourData.scenes.length === 0) {
             console.log('No scenes available, showing no scenes message');
@@ -1476,6 +1562,7 @@ class VirtualTourEditor {
         } catch (error) {
             console.error('Failed to load scene texture:', error);
         }
+        this.isSceneLoading = false;
     }
     
     /**
@@ -1822,9 +1909,12 @@ class VirtualTourEditor {
             return new THREE.Vector3(0, 0, 490);
         }
 
-        const looksAngular = (x >= -180 && x <= 180) && (y >= -90 && y <= 90);
-        if (looksAngular) {
-            const dir = this.lonLatToVector(x, y);
+        const inStdRange = (x >= -180 && x <= 180) && (y >= -90 && y <= 90);
+        const inWrappedRange = (x >= 0 && x < 360) && (y >= -90 && y <= 90);
+        if (inStdRange || inWrappedRange) {
+            let adjLon = x;
+            if (adjLon > 180) adjLon -= 360; // unwrap 0..360 -> -180..180
+            const dir = this.lonLatToVector(adjLon, y);
             return dir.setLength(490);
         }
 
@@ -1854,6 +1944,20 @@ class VirtualTourEditor {
         if (lon > 180) lon -= 360;
         if (lon < -180) lon += 360;
         return { lon, lat };
+    }
+
+    // Normalize degrees to [-180,180)
+    normalizeDeg(d) {
+        let v = ((d % 360) + 360) % 360;
+        if (v >= 180) v -= 360;
+        return v;
+    }
+
+    // Compute reciprocal connection longitude given source absolute hotspot lon and scene north headings
+    computeReciprocalLon(sourceLon, northSource = 0, northTarget = 0) {
+        const rel = this.normalizeDeg(sourceLon - (northSource || 0));
+        const targetRel = this.normalizeDeg(rel + 180);
+        return this.normalizeDeg(targetRel + (northTarget || 0));
     }
 
     // Tooltip helpers for connection hover labels
@@ -1984,8 +2088,9 @@ class VirtualTourEditor {
     updateTargetSceneSelect() {
         const select = document.getElementById('target-scene');
         select.innerHTML = '<option value="">Select target scene...</option>';
-        
-        this.scenes.forEach(scene => {
+        // Ensure scenes reference is current
+        if (Array.isArray(this.tourData.scenes)) this.scenes = this.tourData.scenes;
+        (this.scenes||[]).forEach(scene => {
             if (scene.id !== this.currentSceneId) {
                 const option = document.createElement('option');
                 option.value = scene.id;
@@ -2145,7 +2250,8 @@ class VirtualTourEditor {
         const entry = this.connectionSprites.find(e => e.connection.id === connection.id);
         if (entry) {
             const { lon, lat } = this.vectorToLonLatDeg(entry.sprite.position);
-            connection.position = [parseFloat(lon.toFixed(2)), parseFloat(lat.toFixed(2))];
+            const norm360 = v => { let x = v % 360; if (x < 0) x += 360; return x; };
+            connection.position = [parseFloat(norm360(lon).toFixed(2)), parseFloat(lat.toFixed(2))];
         }
 
         // Update local state
@@ -2180,7 +2286,7 @@ class VirtualTourEditor {
                         data: {
                             connection_id: parseInt(connectionId, 10),
                             new_asset_id: assetIdSafe,
-                            new_position: [Number(newPosition[0]), Number(newPosition[1])],
+                            new_position: [(() => { let v=Number(newPosition[0]); if(!Number.isFinite(v)) v=0; v%=360; if(v<0)v+=360; return v; })(), Number(newPosition[1])],
                 new_name: newName,
                 new_icon_type: iconType,
                 new_file_path: newFilePath
@@ -2410,17 +2516,21 @@ class VirtualTourEditor {
     confirmAddConnection() {
         const targetSceneId = document.getElementById('target-scene').value;
         const nameInput = document.getElementById('connection-name');
+        const returnCheckbox = document.getElementById('create-return-connection');
         if (!targetSceneId || !this.hotspotCreatePosition) {
             alert('Please select a target scene');
             return;
         }
         // Convert click to world-space direction, then to stable lon/lat degrees
         const dir = this.screenToWorldDirection(this.hotspotCreatePosition.x, this.hotspotCreatePosition.y);
-        const { lon, lat } = this.vectorToLonLatDeg(dir);
+    const { lon, lat } = this.vectorToLonLatDeg(dir); // high precision (float)
+    // Normalize lon to 0..360 domain for storage/transmission
+    const norm360 = v => { let x = v % 360; if (x < 0) x += 360; return x; };
+    const lon360 = norm360(lon);
         const name = nameInput ? nameInput.value : null;
 
         // Optimistic add: show immediately
-        const rounded = [Math.round(lon * 100) / 100, Math.round(lat * 100) / 100];
+    const rounded = [Math.round(lon360 * 100) / 100, Math.round(lat * 100) / 100];
         const tempId = -Date.now();
         const optimisticConn = {
             id: tempId,
@@ -2440,10 +2550,17 @@ class VirtualTourEditor {
             start_scene: parseInt(this.currentSceneId),
             target_scene: parseInt(targetSceneId, 10),
             position: rounded,
-            name: optimisticConn.name
+            name: optimisticConn.name,
+            created_at: Date.now()
         });
 
         if (window.app && window.app.socket) {
+            // Preserve higher precision for reciprocal math; send rounded to server for consistency
+            const preciseLon = lon360; // already normalized
+            const preciseLat = lat;
+            const primaryLon = Math.round(preciseLon * 100) / 100;
+            const primaryLat = Math.round(preciseLat * 100) / 100;
+            // Always send the forward connection first
             window.app.socket.send(JSON.stringify({
                 action: "EditTour",
                 data: {
@@ -2453,16 +2570,74 @@ class VirtualTourEditor {
                         data: {
                             start_scene_id: parseInt(this.currentSceneId),
                             asset_id: parseInt(targetSceneId),
-                            // Store lon/lat degrees for stable, view-independent placement
-                            position: [
-                                Math.round(lon * 100) / 100,
-                                Math.round(lat * 100) / 100
-                            ],
+                            position: [ primaryLon, primaryLat ],
                             name: name && name.length ? name : null
                         }
                     }
                 }
             }));
+
+            // Optionally create the reciprocal client-side (previous implementation restored)
+            if (returnCheckbox && returnCheckbox.checked) {
+                const normalizeDeg = (d0) => { let d = d0; while (d >= 180) d -= 360; while (d < -180) d += 360; return d; };
+                const sourceScene = this.scenes.find(s => s.id == this.currentSceneId);
+                const targetScene = this.scenes.find(s => s.id == targetSceneId);
+                const northSource = (sourceScene && typeof sourceScene.north_direction === 'number') ? sourceScene.north_direction : 0;
+                const northTarget = (targetScene && typeof targetScene.north_direction === 'number') ? targetScene.north_direction : 0;
+                // Use precise lon for math (avoid compounded rounding error for long chains)
+                const reciprocalLonPrecise = this.computeReciprocalHeading(preciseLon, northSource, northTarget);
+                const reciprocalLon = Math.round(reciprocalLonPrecise * 100) / 100;
+                const reciprocalLat = Math.round(preciseLat * 100) / 100; // maintain same pitch
+                const reciprocalRounded = [reciprocalLon, reciprocalLat];
+
+                // Optimistically inject reciprocal into target scene so it appears immediately when user switches
+                if (targetScene) {
+                    targetScene.connections = targetScene.connections || [];
+                    const reciprocalTempId = -Date.now() - 1;
+                    const reciprocalConn = {
+                        id: reciprocalTempId,
+                        connection_type: 'Transition',
+                        target_scene_id: parseInt(this.currentSceneId),
+                        position: reciprocalRounded,
+                        name: name && name.length ? name : null
+                    };
+                    targetScene.connections.push(reciprocalConn);
+                    // Only render marker if currently viewing the target scene (user might have switched quickly)
+                    if (this.currentSceneId == parseInt(targetSceneId)) {
+                        this.addConnectionMarker(reciprocalConn);
+                    }
+                    this.pendingConnections.push({
+                        tempId: reciprocalTempId,
+                        start_scene: parseInt(targetSceneId),
+                        target_scene: parseInt(this.currentSceneId),
+                        position: reciprocalRounded,
+                        name: reciprocalConn.name,
+                        created_at: Date.now()
+                    });
+                }
+
+                // Send reciprocal request to server
+                window.app.socket.send(JSON.stringify({
+                    action: "EditTour",
+                    data: {
+                        tour_id: this.currentTourId,
+                        editor_action: {
+                            action: "AddConnection",
+                            data: {
+                                start_scene_id: parseInt(targetSceneId),
+                                asset_id: parseInt(this.currentSceneId),
+                                position: reciprocalRounded,
+                                name: name && name.length ? name : null
+                            }
+                        }
+                    }
+                }));
+            }
+
+            // Persist checkbox preference even though server no longer uses flag
+            if (returnCheckbox) {
+                try { localStorage.setItem('createReturnConnectionPref', returnCheckbox.checked ? '1' : '0'); } catch (e) { /* ignore */ }
+            }
         }
         
         this.closeAddConnectionModal();
@@ -3066,7 +3241,10 @@ class VirtualTourEditor {
         if (this.tourData && this.tourData.scenes) {
             const currentScene = this.tourData.scenes.find(s => s.id == this.currentSceneId);
             if (currentScene) {
-                currentScene.initial_view_x = Math.round(this.lon);
+                let yaw = this.lon;
+                while (yaw < 0) yaw += 360;
+                while (yaw >= 360) yaw -= 360;
+                currentScene.initial_view_x = Math.round(yaw);
                 currentScene.initial_view_y = Math.round(this.lat);
                 currentScene.initial_fov = Math.round(this.camera.fov);
             }
@@ -3082,7 +3260,7 @@ class VirtualTourEditor {
                         action: "SetInitialView",
                         data: {
                             scene_id: parseInt(this.currentSceneId, 10),
-                            position: [Math.round(this.lon), Math.round(this.lat)],
+                            position: [(() => { let y=this.lon; while(y<0) y+=360; while(y>=360) y-=360; return Math.round(y); })(), Math.round(this.lat)],
                             fov: Math.round(this.camera.fov)
                         }
                     }
@@ -3098,25 +3276,19 @@ class VirtualTourEditor {
     
     setNorthDirection() {
         if (!this.currentSceneId) return;
-        
-        // Send north direction to server
+        // Normalize current yaw to 0..360
+        let raw = this.lon;
+        while (raw < 0) raw += 360;
+        while (raw >= 360) raw -= 360;
+        const heading = Math.round(raw);
+        const scene = this.scenes.find(s => s.id == this.currentSceneId);
+        if (scene) scene.north_direction = heading;
         if (window.app && window.app.socket) {
             window.app.socket.send(JSON.stringify({
                 action: "EditTour",
-                data: {
-                    tour_id: this.currentTourId,
-                    editor_action: {
-                        action: "SetNorthDirection",
-                        data: {
-                            scene_id: parseInt(this.currentSceneId),
-                            direction: Math.round(this.lon)
-                        }
-                    }
-                }
+                data: { tour_id: this.currentTourId, editor_action: { action: "SetNorthDirection", data: { scene_id: parseInt(this.currentSceneId), direction: heading } } }
             }));
         }
-        
-        alert('North direction saved');
     }
 
     // ====================================
@@ -3421,6 +3593,17 @@ function setNorthDirection() {
     if (editor) editor.setNorthDirection();
 }
 
+// Restore persistent checkbox preference on load
+window.addEventListener('DOMContentLoaded', () => {
+    try {
+        const saved = localStorage.getItem('createReturnConnectionPref');
+        if (saved !== null) {
+            const cb = document.getElementById('create-return-connection');
+            if (cb) cb.checked = saved === '1';
+        }
+    } catch (e) {}
+});
+
 // change to export tour to package as standalone folder ***
 // function saveTour() {
 //     if (editor) {
@@ -3431,10 +3614,6 @@ function setNorthDirection() {
 function goHome() {
     localStorage.removeItem('currentTourId');
     window.location.href = '/homepage';
-}
-
-function sortScenes() {
-    // Deprecated placeholder
 }
 
 async function exportCurrentTour() {

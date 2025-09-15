@@ -368,7 +368,7 @@ impl Database {
     /// * `Ok(Some(TourData))` - The tour data with scenes and connections.
     /// * `Ok(None)` - If the tour doesn't exist or doesn't belong to the user.
     /// * `Err(sqlx::Error)` - If the query fails.
-        pub async fn get_tour_with_scenes(&self, username: &str, tour_id: i64) -> Result<Option<serde_json::Value>, sqlx::Error> {
+    pub async fn get_tour_with_scenes(&self, username: &str, tour_id: i64) -> Result<Option<serde_json::Value>, sqlx::Error> {
         // First get the tour
     let tour_row = sqlx::query("SELECT id, tour_name, created_at, modified_at, initial_scene_id, sort_mode, sort_direction, has_floorplan, floorplan_id
                                    FROM tours WHERE id = ?1 AND owner = ?2")

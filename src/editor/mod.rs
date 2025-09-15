@@ -188,6 +188,21 @@ impl EditorState {
                 self.add_closeup(name, file_path, parent_scene_id, position, icon_type, tx).await?;
             }
             EditorAction::AddConnection { start_scene_id, asset_id, position, name } => {
+                // Duplicate prevention: check if a connection already exists from start_scene_id to asset_id
+                if let Some(scene_index) = self.scenes_index.get(&start_scene_id) {
+                    if let Some(scene) = self.scenes.get(*scene_index) {
+                        let exists = scene.connections.iter().any(|c| c.target_scene_id == asset_id);
+                        if exists {
+                            println!("Duplicate connection suppressed: {} -> {}", start_scene_id, asset_id);
+                            let msg = format!(
+                                r#"{{"type":"duplicate_connection","start_scene":"{}","target_scene":"{}"}}"#,
+                                start_scene_id, asset_id
+                            );
+                            let _ = tx.send(Message::Text(msg));
+                            return Ok(()); // Early return; no action taken
+                        }
+                    }
+                }
                 self.add_connection(start_scene_id, asset_id, position, name, tx).await?;
             }
             EditorAction::EditConnection { connection_id, new_asset_id, new_position, new_name, new_icon_type, new_file_path } => {
@@ -531,8 +546,13 @@ impl EditorState {
         tx: &mpsc::UnboundedSender<Message>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if let Some(scene) = self.scenes.iter_mut().find(|s| s.id == start_scene_id) {
-            // Determine if provided position is lon/lat
-            let (world_lon, world_lat) = (position.0 as f32, position.1 as f32);
+            // Determine if provided position is lon/lat and normalize longitude to 0..360
+            let mut world_lon = position.0 as f32;
+            if world_lon.is_finite() {
+                world_lon = world_lon % 360.0;
+                if world_lon < 0.0 { world_lon += 360.0; }
+            }
+            let world_lat = position.1 as f32;
 
             // Save connection to database first to get auto-generated ID
             let connection_db_id = if let Some(ref db) = self.db {
@@ -609,7 +629,9 @@ impl EditorState {
                 if let Some(scene) = self.scenes.get_mut(scene_idx) {
                     if let Some(connection) = scene.connections.get_mut(conn_idx) {
                         connection.target_scene_id = new_target_id;
-                        connection.position = Coordinates { x: new_position.0 as f32, y: new_position.1 as f32 };
+                        let mut lon_norm = new_position.0 as f32;
+                        if lon_norm.is_finite() { lon_norm = lon_norm % 360.0; if lon_norm < 0.0 { lon_norm += 360.0; } }
+                        connection.position = Coordinates { x: lon_norm, y: new_position.1 as f32 };
                         if new_name.is_some() { connection.name = new_name.clone(); }
                         if new_icon_type.is_some() { connection.icon_index = new_icon_type; }
                         // Persist update in DB
@@ -617,7 +639,7 @@ impl EditorState {
                             let _ = db.update_connection(
                                 connection_id as i64,
                                 Some(new_target_id as i64),
-                                Some(new_position.0 as f32),
+                                Some(lon_norm),
                                 Some(new_position.1 as f32),
                                 new_name.as_deref(),
                                 new_icon_type,
@@ -706,12 +728,14 @@ impl EditorState {
         tx: &mpsc::UnboundedSender<Message>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             if let Some(scene) = self.scenes.iter_mut().find(|s| s.id == scene_id) {
-            scene.initial_view = Some(Coordinates { x: position.0, y: position.1 });
+            let mut yaw = position.0;
+            if yaw.is_finite() { yaw = yaw % 360.0; if yaw < 0.0 { yaw += 360.0; } }
+            scene.initial_view = Some(Coordinates { x: yaw, y: position.1 });
             print!("{:?}", position);
 
             // Update database if available
             if let Some(ref db) = self.db {
-                if let Err(e) = db.update_scene(scene.id as i64, None, None, Some(position.0 as f32), Some(position.1 as f32), None, fov).await {
+                if let Err(e) = db.update_scene(scene.id as i64, None, None, Some(yaw as f32), Some(position.1 as f32), None, fov).await {
                         eprintln!("Failed to update scene initial view in database: {}", e);
                     }
             }
@@ -733,17 +757,33 @@ impl EditorState {
         tx: &mpsc::UnboundedSender<Message>
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             if let Some(scene) = self.scenes.iter_mut().find(|s| s.id == scene_id) {
-            scene.north_direction = Some(direction);
+            // Normalize to 0..360
+            let mut d = direction % 360.0;
+            if d < 0.0 { d += 360.0; }
+            scene.north_direction = Some(d);
             
             // Update database if available
             if let Some(ref db) = self.db {
-                if let Err(e) = db.update_scene(scene.id as i64, None, None, None, None, Some(direction), None).await {
+                if let Err(e) = db.update_scene(scene.id as i64, None, None, None, None, Some(d), None).await {
                         eprintln!("Failed to update scene north direction in database: {}", e);
                     } else {
                         println!("North direction updated for scene '{}' in database", scene.name);
                     }
                 }
             
+            // Broadcast an update so other connected clients (and this one) can refresh scene state
+            let scene_update = serde_json::json!({
+                "type": "scene_updated",
+                "scene": {
+                    "id": scene.id,
+                    "name": scene.name,
+                    "file_path": scene.file_path,
+                    "initial_view_x": scene.initial_view.as_ref().map(|c| c.x),
+                    "initial_view_y": scene.initial_view.as_ref().map(|c| c.y),
+                    "north_dir": scene.north_direction,
+                }
+            });
+            let _ = tx.send(Message::Text(scene_update.to_string()));
             let _ = tx.send(Message::Text(r#"{"type": "success", "message": "North direction saved."}"#.to_string()));
         } else {
             let _ = tx.send(Message::Text(r#"{"type": "error", "message": "Scene not found."}"#.to_string()));
@@ -990,6 +1030,8 @@ impl EditorState {
         Ok(())
     }
 }
+
+// (Removed reciprocal angle helpers; logic now handled client-side only.)
 
 /// Handle file upload for assets
 pub async fn upload_asset_handler(mut multipart: Multipart) -> impl IntoResponse {

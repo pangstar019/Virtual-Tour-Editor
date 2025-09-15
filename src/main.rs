@@ -838,12 +838,7 @@ async fn export_tour_handler(
     if builtin_engine.exists() {
         if let Ok(bytes) = std::fs::read(builtin_engine) { let _ = add_file("js/engine.min.js", &bytes); engine_added = true; }
     }
-    // Also try to source engine from example viewer if present (secondary)
-    let candidate_engine = std::path::Path::new("203 Ambleside/js/engine.min.js");
-    if !engine_added && candidate_engine.exists() {
-        if let Ok(bytes) = std::fs::read(candidate_engine) { let _ = add_file("js/engine.min.js", &bytes); engine_added = true; }
-    }
-    let candidate_three = std::path::Path::new("203 Ambleside/js/three.min.js");
+    let candidate_three = std::path::Path::new("static/export-viewer/js/three.min.js");
     if candidate_three.exists() {
         if let Ok(bytes) = std::fs::read(candidate_three) { let _ = add_file("js/three.min.js", &bytes); three_added = true; }
     }
