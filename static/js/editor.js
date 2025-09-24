@@ -2527,7 +2527,7 @@ class VirtualTourEditor {
     // Normalize lon to 0..360 domain for storage/transmission
     const norm360 = v => { let x = v % 360; if (x < 0) x += 360; return x; };
     const lon360 = norm360(lon);
-        const name = nameInput ? nameInput.value : null;
+    const name = nameInput ? nameInput.value : null;
 
         // Optimistic add: show immediately
     const rounded = [Math.round(lon360 * 100) / 100, Math.round(lat * 100) / 100];
@@ -2599,7 +2599,8 @@ class VirtualTourEditor {
                         connection_type: 'Transition',
                         target_scene_id: parseInt(this.currentSceneId),
                         position: reciprocalRounded,
-                        name: name && name.length ? name : null
+                        // Reciprocal should not inherit forward custom name; use null so UI can derive default scene name
+                        name: null
                     };
                     targetScene.connections.push(reciprocalConn);
                     // Only render marker if currently viewing the target scene (user might have switched quickly)
@@ -2627,7 +2628,8 @@ class VirtualTourEditor {
                                 start_scene_id: parseInt(targetSceneId),
                                 asset_id: parseInt(this.currentSceneId),
                                 position: reciprocalRounded,
-                                name: name && name.length ? name : null
+                                // Do not send forward name for reciprocal; let backend store null/default
+                                name: null
                             }
                         }
                     }
@@ -2640,6 +2642,8 @@ class VirtualTourEditor {
             }
         }
         
+        // Reset name field so it doesn't persist into next connection creation
+        if (nameInput) nameInput.value = '';
         this.closeAddConnectionModal();
     }
 
@@ -2678,6 +2682,9 @@ class VirtualTourEditor {
         this.hotspotCreatePosition = null;
         // Clear mouse state when closing modal to prevent stuck mouse down state
         this.clearMouseState();
+        // Also clear the connection name input to avoid unintended carry-over when reopened
+        const nameInput = document.getElementById('connection-name');
+        if (nameInput) nameInput.value = '';
     }
 
     // ===== CLOSEUPS =====

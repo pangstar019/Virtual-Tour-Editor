@@ -11,6 +11,7 @@ mod editor;
 mod tour;
 mod config;
 mod user;
+mod importer; // new module for re-importing exported tours
 
 use tour::Tour;
 
@@ -93,6 +94,32 @@ enum ClientMessage {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Attempt to normalize current working directory so relative paths (config/, static/, assets/) work
+    // even when running from target/{debug,release}.
+    if let Ok(exec_path) = std::env::current_exe() {
+        if let Some(exec_dir) = exec_path.parent() {
+            // If binary lives in target/(debug|release), move CWD to project root (two levels up)
+            if let Some(dir_name) = exec_dir.file_name().and_then(|s| s.to_str()) {
+                if dir_name == "release" || dir_name == "debug" {
+                    if let Some(target_dir) = exec_dir.parent() { // target
+                        if let Some(project_root) = target_dir.parent() { // project root
+                            // Heuristic: only change if config/ or static/ actually exist there
+                            let has_static = project_root.join("static").exists();
+                            let has_config_dir = project_root.join("config").exists();
+                            if has_static || has_config_dir {
+                                if let Err(e) = std::env::set_current_dir(project_root) {
+                                    eprintln!("Warning: failed to set current dir to project root {:?}: {}", project_root, e);
+                                } else {
+                                    println!("Working directory adjusted to project root: {:?}", project_root);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Load configuration
     let config = config::Config::load().unwrap_or_else(|e| {
         eprintln!("Failed to load configuration: {}. Using defaults.", e);

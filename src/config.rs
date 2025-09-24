@@ -34,9 +34,29 @@ impl Config {
         Ok(config)
     }
 
-    /// Load configuration from the default config.toml file
+    /// Determine the canonical system configuration path.
+    /// Windows: %APPDATA%/VirtualTourEditor/config.toml
+    /// macOS: ~/Library/Application Support/VirtualTourEditor/config.toml
+    /// Linux/Unix: $XDG_CONFIG_HOME/virtual-tour-editor/config.toml or ~/.config/virtual-tour-editor/config.toml
+    pub fn system_config_path() -> std::path::PathBuf {
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(appdata) = std::env::var_os("APPDATA") {
+                return std::path::PathBuf::from(appdata).join("VirtualTourEditor").join("config.toml");
+            }
+            // Fallback to current dir if APPDATA missing
+            return std::path::PathBuf::from("config.toml");
+        }
+    }
+
+    /// Load configuration solely from the system configuration path.
     pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
-        Self::load_from_file("config.toml")
+        let path = Self::system_config_path();
+        if !path.exists() {
+            return Err(From::from(format!("config file not found at system path: {:?}", path)));
+        }
+        println!("Config loading from system path: {:?}", path);
+        Self::load_from_file(path)
     }
 
     /// Get the server bind address

@@ -849,6 +849,31 @@ impl Database {
         Ok(result.last_insert_rowid())
     }
 
+    /// Saves a floorplan image as an asset (is_floorplan=1) and returns its ID
+    pub async fn save_floorplan(&self, tour_id: i64, name: &str, file_path: &str) -> Result<i64, sqlx::Error> {
+        let result = sqlx::query("INSERT INTO assets (tour_id, name, file_path, is_floorplan) VALUES (?1, ?2, ?3, 1)")
+            .bind(tour_id)
+            .bind(name)
+            .bind(file_path)
+            .execute(&*self.pool)
+            .await?;
+        Ok(result.last_insert_rowid())
+    }
+
+    /// Saves a floorplan marker connection (is_floorplan=1)
+    pub async fn save_floorplan_marker(&self, tour_id: i64, floorplan_id: i64, scene_asset_id: i64, world_lon: f32, world_lat: f32) -> Result<i64, sqlx::Error> {
+        let result = sqlx::query("INSERT INTO connections (tour_id, start_id, end_id, floorplan_id, is_floorplan, world_lon, world_lat, is_transition) VALUES (?1, ?2, ?3, ?4, 1, ?5, ?6, 0)")
+            .bind(tour_id)
+            .bind(floorplan_id) // start_id = floorplan asset id
+            .bind(scene_asset_id) // end_id = scene id
+            .bind(floorplan_id)
+            .bind(world_lon)
+            .bind(world_lat)
+            .execute(&*self.pool)
+            .await?;
+        Ok(result.last_insert_rowid())
+    }
+
     /// Gets a scene database ID by tour ID and scene UUID
     pub async fn get_scene_db_id(&self, tour_id: i64, scene_name: &str) -> Result<Option<i64>, sqlx::Error> {
         let row = sqlx::query("SELECT id FROM assets WHERE tour_id = ?1 AND name = ?2 AND is_scene = 1")
